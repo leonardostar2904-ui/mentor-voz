@@ -172,6 +172,11 @@ details.conv summary::-webkit-details-marker{display:none}
       <div class="linha"><button type="button" class="btn ghost" id="aVsBuscar">Buscar minhas vozes</button></div>
       <label for="aVsVoz">Voz do VoiceStudio</label>
       <select id="aVsVoz"><option value="">Busque as vozes primeiro</option></select>
+      <label for="aVsMotor">Motor de voz</label>
+      <select id="aVsMotor">
+        <option value="moss-tts-nano">MOSS Nano · mais rápido, sem risada</option>
+        <option value="omnivoice">OmniVoice · ri e suspira, bem mais lento</option>
+      </select>
       <small id="aVsInfo"></small>
     </div>
     <div class="campo bloco" id="blocoEL">
@@ -259,6 +264,7 @@ const VOZ_REGRAS = [
   'Daqui você não altera nada no sistema. Quando ele pedir uma mudança, como um pagamento, uma dívida, a agenda ou um lead, confirme em uma frase o que entendeu e diga que isso vai no resumo para a Cabine. Não escreva bloco de mudanças.',
   'Não use travessão, reticências nem ponto de exclamação.'
 ].join('\n');
+const VOZ_NATURAL_SEM_TAG = 'Fale como gente numa conversa: pode começar com "olha", "pô", "caramba", "então", e variar o ritmo. Não use marcações entre colchetes, esta voz não entende. Respostas bem curtas, de uma a três frases, porque cada frase leva alguns segundos para virar voz.';
 const VOZ_EMOCAO_VS = [
   'A sua voz agora é natural e entende só estas marcações entre colchetes: [laughter] para uma risada, [sigh] para um suspiro e [pause 500ms] para uma pausa curta. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nenhuma outra marcação, e nunca escreva risada como texto, como haha ou kkk.',
   'Fale como gente numa conversa: pode começar com "olha", "pô", "caramba", "então", e variar o ritmo com frases curtas e algumas mais longas. Reticências e vírgulas ajudam a entonação aqui, pode usar. Sem exagero e sem forçar sotaque.'
@@ -435,7 +441,7 @@ function vozEscolhida(){
 function limparFala(s){ return s.replace(/\[[^\]]{1,30}\]/g, ' ').replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 function textoEL(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 let elKey = LS.get('mv-el-key', ''), elVoz = LS.get('mv-el-voz', ''), elModelo = LS.get('mv-el-modelo', 'eleven_v4_turbo');
-let vsUrl = LS.get('mv-vs-url', 'http://127.0.0.1:3900'), vsVoz = LS.get('mv-vs-voz', '');
+let vsUrl = LS.get('mv-vs-url', 'http://127.0.0.1:3900'), vsVoz = LS.get('mv-vs-voz', ''), vsMotor = LS.get('mv-vs-motor', 'moss-tts-nano');
 let provedor = LS.get('mv-prov', (elKey && elVoz) ? 'el' : 'vs');
 let pularNatural = false;   // depois de uma falha na sessão, segue na voz do navegador sem tentar de novo a cada frase
 const usaEL = () => !pularNatural && ((provedor === 'el' && !!(elKey && elVoz)) || (provedor === 'vs' && !!(vsUrl && vsVoz)));
@@ -456,6 +462,7 @@ function falarNavegador(t, fim){
   fala.speak(u);
 }
 function textoVS(t){
+  if (vsMotor !== 'omnivoice') return t.replace(/\[(?!pause\b)[^\]]{1,30}\]/gi, ' ').replace(/\s+/g, ' ').trim();
   return t.replace(/\[(laughs?|chuckles?|laughter|giggles?)\]/gi, '[laughter]').replace(/\[(sighs?|sigh)\]/gi, '[sigh]')
     .replace(/\[(?!laughter\]|sigh\]|pause\b)[^\]]{1,30}\]/gi, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -463,7 +470,7 @@ function pedirAudio(t){
   if (provedor === 'vs') {
     return fetch(vsUrl.replace(/\/+$/, '') + '/v1/audio/speech', {
       method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({model:'omnivoice', input: textoVS(t), voice: vsVoz, response_format:'mp3', language:'pt', speed: vel})
+      body: JSON.stringify({model: vsMotor, input: textoVS(t), voice: vsVoz, response_format:'mp3', language:'pt-BR', speed: vel})
     }).then(async r => {
       if (!r.ok) {
         let m = ''; try { const j = await r.json(); m = (j.error && j.error.message) || j.detail || ''; } catch (e) {}
@@ -488,7 +495,9 @@ function tocarProximo(){
   if (!it) { tocando = false; return; }
   tocando = true;
   const g = geracao;
+  const demora = setTimeout(() => { if (g === geracao && st !== 'ouvindo') $('dica').textContent = 'Preparando a voz no seu computador. Pode levar alguns segundos.'; }, 4000);
   it.p.then(res => {
+    clearTimeout(demora);
     if (g !== geracao) return;
     const fim = () => { if (g !== geracao) return; falaTerminou(); tocarProximo(); };
     if (!res || res.erro) {
@@ -523,7 +532,7 @@ function depoisDeFalar(){
 function calar(){ geracao++; filaAudio = []; tocando = false; try { player.pause(); } catch (e) {} if (fala) fala.cancel(); falandoN = 0; }
 
 /* ---------- conversar com o Claude ---------- */
-function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + (provedor === 'vs' ? VOZ_EMOCAO_VS : VOZ_EMOCAO) : '') + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
+function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + (provedor === 'vs' ? (vsMotor === 'omnivoice' ? VOZ_EMOCAO_VS : VOZ_NATURAL_SEM_TAG) : VOZ_EMOCAO) : '') + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
 const ERROS = {
   401: 'A chave da API não foi aceita. Confira em Ajustes.',
   403: 'Esta chave não tem permissão para esse modelo.',
@@ -653,7 +662,7 @@ function abrir(qual){
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
     $('aElKey').value = elKey; $('aElModelo').value = elModelo; marcarVozEL(); if (elKey) creditosEL();
-    $('aProv').value = provedor; $('aVsUrl').value = vsUrl; marcarVozVS(); mostrarBlocos();
+    $('aProv').value = provedor; $('aVsUrl').value = vsUrl; $('aVsMotor').value = vsMotor; marcarVozVS(); mostrarBlocos();
     $('fAjustes').hidden = false;
   } else $('fResumo').hidden = false;
 }
@@ -674,8 +683,8 @@ $('aSalvar').addEventListener('click', () => {
   espera = Number($('aEsp').value) || 2.5; porCima = $('aPorCima').checked; LS.set('mv-espera', String(espera)); LS.set('mv-porcima', porCima ? '1' : '0');
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
-  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; pularNatural = false; avisouEL = false;
-  LS.set('mv-prov', provedor); LS.set('mv-vs-url', vsUrl); LS.set('mv-vs-voz', vsVoz);
+  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; vsMotor = $('aVsMotor').value; pularNatural = false; avisouEL = false;
+  LS.set('mv-vs-motor', vsMotor); LS.set('mv-prov', provedor); LS.set('mv-vs-url', vsUrl); LS.set('mv-vs-voz', vsVoz);
   elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
   LS.set('mv-el-key', elKey); LS.set('mv-el-voz', elVoz); LS.set('mv-el-modelo', elModelo);
   LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
@@ -685,7 +694,7 @@ $('aSalvar').addEventListener('click', () => {
 $('aTeste').addEventListener('click', () => {
   vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05;
   elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
-  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value;
+  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; vsMotor = $('aVsMotor').value;
   calar(); avisouEL = false; pularNatural = false; aviso('');
   try { player.src = SILENCIO; player.play().catch(() => {}); } catch (e) {}
   if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); if (provedor === 'el') setTimeout(creditosEL, 4000); }
@@ -757,7 +766,7 @@ async function creditosEL(){
   } catch (e) {}
 }
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-el-key', 'mv-el-voz', 'mv-el-modelo', 'mv-el-resta', 'mv-prov', 'mv-vs-url', 'mv-vs-voz'].forEach(LS.del);
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-el-key', 'mv-el-voz', 'mv-el-modelo', 'mv-el-resta', 'mv-prov', 'mv-vs-url', 'mv-vs-voz', 'mv-vs-motor'].forEach(LS.del);
   key = ''; ctx = ''; ctxEm = ''; msgs = []; elKey = ''; elVoz = ''; vsVoz = ''; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
