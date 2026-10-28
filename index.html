@@ -95,6 +95,8 @@ details.conv summary::-webkit-details-marker{display:none}
 .campo input[type=range]{padding:0;accent-color:var(--ink);background:none;border:0}
 .resumo textarea{min-height:46vh;font-size:14.5px;line-height:1.5}
 .ok{color:var(--ouve);font-size:14px}
+.chk{display:flex;gap:10px;align-items:center;color:var(--ink)!important;font-size:15px!important;cursor:pointer}
+.chk input{width:20px;height:20px;margin:0;accent-color:var(--ink)}
 .passos{margin:0;padding-left:20px;font-size:14.5px;display:flex;flex-direction:column;gap:6px;color:var(--mute)}
 .passos b{color:var(--ink);font-weight:500}
 </style>
@@ -113,7 +115,7 @@ details.conv summary::-webkit-details-marker{display:none}
   <section class="palco" aria-live="polite">
     <button type="button" class="orb" id="orb" aria-label="Conversar"><span class="anel"></span><span class="anel b"></span><span class="nucleo"></span></button>
     <p class="estado" id="estado">Toque para conversar</p>
-    <p class="dica" id="dica">Fale normalmente. Quando você parar, ele responde falando e volta a escutar.</p>
+    <p class="dica" id="dica"></p>
     <p class="legenda" id="legenda"></p>
     <div class="aviso" id="aviso" hidden></div>
   </section>
@@ -158,12 +160,16 @@ details.conv summary::-webkit-details-marker{display:none}
     </div>
     <div class="campo">
       <label for="aVel">Velocidade da fala: <span id="aVelTxt">1,0</span></label>
-      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="0.95">
+      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="1.05">
     </div>
     <div class="campo">
-      <label for="aTom">Tom da voz: <span id="aTomTxt">0,85</span></label>
-      <input id="aTom" type="range" min="0.6" max="1.2" step="0.05" value="0.85">
-      <small>Mais baixo deixa a voz mais grave. No Android a voz costuma ser uma só, então o tom é o que mais muda.</small>
+      <label for="aEsp">Espera depois que você para de falar: <span id="aEspTxt">2,5</span> segundos</label>
+      <input id="aEsp" type="range" min="1.5" max="5" step="0.5" value="2.5">
+      <small>Se ele responder antes de você terminar o raciocínio, aumente.</small>
+    </div>
+    <div class="campo">
+      <label class="chk" for="aPorCima"><input type="checkbox" id="aPorCima"> Parar de falar quando eu falar por cima</label>
+      <small>Funciona melhor com fone. Se ele se interromper sozinho ouvindo a própria voz no alto-falante, desligue.</small>
     </div>
     <div class="linha">
       <button type="button" class="btn ghost" id="aTeste">Testar a voz</button>
@@ -221,23 +227,25 @@ const SEM_CONTEXTO = 'Você é o Mentor pessoal de quem usa esta página: estrat
 
 let key = LS.get('mv-key', ''), modelo = LS.get('mv-modelo', 'claude-sonnet-5-5');
 let ctx = LS.get('mv-ctx', ''), ctxEm = LS.get('mv-ctx-em', '');
-let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '0.95')) || 0.95, tom = Number(LS.get('mv-tom', '0.85')) || 0.85;
+let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '1.05')) || 1.05;
 let msgs = []; try { msgs = JSON.parse(LS.get('mv-msgs', '[]')) || []; } catch (e) { msgs = []; }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const fala = 'speechSynthesis' in window ? window.speechSynthesis : null;
-let st = 'parado', ativo = false, rec = null, ctl = null, fila = [], falandoN = 0, streamFim = true, wake = null, reinicios = 0, audio = null;
+let st = 'parado', ativo = false, rec = null, ctl = null, falandoN = 0, streamFim = true, wake = null, audio = null;
+let espera = Number(LS.get('mv-espera', '2.5')) || 2.5, porCima = LS.get('mv-porcima', '1') === '1';
 
 /* ---------- estado e tela ---------- */
+const seg = () => String(espera).replace('.', ',');
 const TXT = {
-  parado: ['Toque para conversar', 'Fale normalmente. Quando você parar, ele responde falando e volta a escutar.'],
-  ouvindo: ['Ouvindo', 'Pode falar. Toque no círculo para pausar.'],
-  pensando: ['Pensando', 'Toque no círculo para cancelar.'],
-  falando: ['Falando', 'Toque no círculo para interromper e falar.']
+  parado: () => ['Toque para começar', 'Um toque só. Depois é conversa solta: ele espera você terminar, responde falando e volta a escutar.'],
+  ouvindo: () => ['Ouvindo', 'Fale no seu ritmo. Depois de ' + seg() + ' segundos de silêncio ele responde.'],
+  pensando: () => ['Pensando', 'Preparando a resposta.'],
+  falando: () => ['Falando', porCima ? 'Se quiser, fale por cima que ele para e escuta.' : 'Quando ele terminar, volta a escutar sozinho.']
 };
 function setSt(s){
   st = s; $('app').dataset.st = s;
-  $('estado').textContent = TXT[s][0]; $('dica').textContent = TXT[s][1];
+  const tx = TXT[s](); $('estado').textContent = tx[0]; $('dica').textContent = tx[1];
   $('orb').setAttribute('aria-label', s === 'parado' ? 'Conversar' : s === 'ouvindo' ? 'Pausar' : s === 'pensando' ? 'Cancelar' : 'Interromper');
   $('bPausa').disabled = !ativo; $('bPausa').textContent = ativo ? 'Pausar' : 'Pausado';
   $('bResumo').disabled = !msgs.length || s === 'pensando';
@@ -293,58 +301,108 @@ async function manterTela(on){
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && ativo) manterTela(true); });
 
-/* ---------- ouvir ---------- */
-function ouvir(){
-  if (!ativo) return;
+/* ---------- microfone: escuta contínua, espera o silêncio e deixa falar por cima ---------- */
+let base = '', texto = '', silT = null, ultimoSom = 0, falaAtual = '', desde = 0;
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function juntar(results, ini){
+  let fin = '', inter = '';
+  for (let i = ini || 0; i < results.length; i++) {
+    const t = String(results[i][0].transcript || '').trim(); if (!t) continue;
+    if (results[i].isFinal) {
+      const a = norm(fin), b = norm(t);
+      if (a && b.startsWith(a)) fin = t;            // o Chrome do Android repete o trecho anterior
+      else if (!a.endsWith(b)) fin = (fin + ' ' + t).trim();
+    } else if (t.length > inter.length) inter = t;
+  }
+  if (!inter) return fin;
+  const a = norm(fin), b = norm(inter);
+  if (a && b.startsWith(a)) return inter;
+  return (fin + ' ' + inter).trim();
+}
+function ehEco(t){
+  // o microfone também ouve a voz do Mentor: só conta como fala sua o que não está no texto que ele está falando
+  const ws = norm(t).split(' ').filter(w => w.length >= 3);
+  if (ws.length < 2) return true;
+  const dito = new Set(norm(falaAtual).split(' '));
+  return ws.filter(w => dito.has(w)).length / ws.length >= 0.6;
+}
+function armarSilencio(){
+  clearTimeout(silT);
+  silT = setTimeout(() => {
+    const t = texto.trim();
+    if (st === 'ouvindo' && t) { texto = ''; base = ''; pararOuvir(); enviar(t); }
+  }, espera * 1000);
+}
+function ligarMic(){
+  if (!ativo || rec) return;
   if (!SR) { ativo = false; setSt('parado'); aviso('Este navegador não reconhece voz. No Android, abra no Chrome. No iPhone, use o Safari atualizado. Você também pode escrever abaixo.'); return; }
-  pararOuvir();
-  let texto = '', fim = false;
-  rec = new SR(); rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-  rec.onstart = () => { reinicios = 0; setSt('ouvindo'); bip(); legenda(''); };
-  rec.onresult = e => {
-    let fin = '', inter = '';
-    for (let i = 0; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) fin += r[0].transcript; else inter += r[0].transcript; }
-    texto = (fin || inter).trim(); legenda(texto);
-    if (fin) fim = true;
+  const r = new SR(); r.lang = 'pt-BR'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+  rec = r; desde = 0;
+  r.onresult = e => {
+    if (rec !== r) return;
+    if (st === 'falando') {
+      if (!porCima) return;
+      const t0 = juntar(e.results, e.resultIndex);
+      if (ehEco(t0)) return;
+      // ele começou a falar por cima: o Mentor para e passa a escutar
+      desde = e.resultIndex; base = '';
+      calar(); streamFim = true; if (ctl) ctl.abort();
+      setSt('ouvindo');
+    }
+    if (st !== 'ouvindo') return;
+    ultimoSom = Date.now();
+    texto = (base + ' ' + juntar(e.results, desde)).trim();
+    legenda(texto); armarSilencio();
   };
-  rec.onerror = e => {
+  r.onerror = e => {
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { ativo = false; aviso('O navegador bloqueou o microfone. Libere o microfone para esta página nas configurações do navegador e toque no círculo de novo.'); }
     else if (e.error === 'network') { aviso('O reconhecimento de voz precisa de internet. Confira a conexão.'); }
     else if (e.error === 'audio-capture') { ativo = false; aviso('Não achei microfone neste aparelho.'); }
   };
-  rec.onend = () => {
+  r.onend = () => {
+    if (rec !== r) return;
     rec = null;
-    if (!ativo) { if (st === 'ouvindo') setSt('parado'); return; }
-    if (texto && (fim || texto.length > 1)) { enviar(texto); return; }
-    // silêncio: volta a escutar, com limite para não ficar em laço
-    if (++reinicios <= 12) setTimeout(() => { if (ativo && st === 'ouvindo') ouvir(); }, 200);
-    else { ativo = false; setSt('parado'); legenda(''); $('dica').textContent = 'Pausei por silêncio. Toque para continuar.'; manterTela(false); }
+    if (!ativo) { if (st === 'ouvindo') { setSt('parado'); manterTela(false); } return; }
+    if (st === 'pensando') return;
+    if (st === 'ouvindo') {
+      base = texto;                                   // o navegador encerrou sozinho: continua de onde parou
+      if (!texto.trim() && Date.now() - ultimoSom > 120000) { ativo = false; setSt('parado'); legenda(''); $('dica').textContent = 'Pausei depois de 2 minutos em silêncio. Toque para continuar.'; manterTela(false); return; }
+    }
+    setTimeout(() => { if (ativo && !rec && (st === 'ouvindo' || st === 'falando')) ligarMic(); }, 150);
   };
-  try { rec.start(); } catch (e) { setTimeout(() => { if (ativo) ouvir(); }, 400); }
+  try { r.start(); } catch (e) { rec = null; setTimeout(() => { if (ativo && !rec) ligarMic(); }, 400); }
 }
-function pararOuvir(){ if (rec) { try { rec.onend = null; rec.abort(); } catch (e) {} rec = null; } }
+function ouvir(){
+  // começa um turno de escuta limpo
+  if (!ativo) return;
+  pararOuvir(); base = ''; texto = ''; ultimoSom = Date.now();
+  setSt('ouvindo'); bip(); legenda('');
+  ligarMic();
+}
+function pararOuvir(){ clearTimeout(silT); if (rec) { const r = rec; rec = null; try { r.abort(); } catch (e) {} } }
 
 /* ---------- falar ---------- */
 function vozEscolhida(){
   if (!fala) return null;
-  const vs = fala.getVoices(), br = vs.filter(v => /pt[-_]BR/i.test(v.lang));
-  // sem escolha salva, prefere uma voz masculina pt-BR, de preferência as naturais (perto da voz Andre aprovada no Voice Studio)
-  const masc = /Antonio|Ant[oô]nio|Felipe|Daniel|Donato|Fabio|F[aá]bio|Julio|J[uú]lio|Nicolau|Valerio|Val[eé]rio|Humberto|male|masculin/i;
-  return vs.find(v => v.name === vozNome) || br.find(v => masc.test(v.name) && /natural|online|enhanced|premium/i.test(v.name)) || br.find(v => masc.test(v.name)) || br[0] || vs.find(v => /^pt/i.test(v.lang)) || null;
+  const vs = fala.getVoices();
+  return vs.find(v => v.name === vozNome) || vs.find(v => /pt[-_]BR/i.test(v.lang)) || vs.find(v => /^pt/i.test(v.lang)) || null;
 }
 function limparFala(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 function enfileirar(frase){
   const t = limparFala(frase); if (!t || !fala) return;
   const u = new SpeechSynthesisUtterance(t);
-  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel; u.pitch = tom;
+  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel;
   falandoN++;
-  u.onstart = () => { if (st !== 'falando') setSt('falando'); };
+  u.onstart = () => {
+    if (st === 'pensando') setSt('falando');
+    if (st === 'falando' && porCima && ativo && !rec) ligarMic();
+  };
   u.onend = u.onerror = () => { falandoN = Math.max(0, falandoN - 1); depoisDeFalar(); };
   fala.speak(u);
 }
 function depoisDeFalar(){
   if (falandoN > 0 || !streamFim) return;
-  if (rec) return;
+  if (st === 'ouvindo') return;                       // ele já falou por cima e está sendo ouvido
   if (ativo) ouvir(); else if (st === 'falando' || st === 'pensando') setSt('parado');
 }
 function calar(){ if (fala) fala.cancel(); falandoN = 0; }
@@ -405,9 +463,10 @@ async function enviar(texto){
   msgs.push({role:'user', content:q}); salvarMsgs(); renderMsgs();
   setSt('pensando'); legenda(q);
   ctl = new AbortController(); streamFim = false;
-  let falado = 0, resp = '';
+  let falado = 0, resp = ''; falaAtual = '';
   const enviarFrases = (tudo, final) => {
     // fala frase a frase enquanto a resposta chega
+    falaAtual = tudo;
     let resto = tudo.slice(falado);
     const re = /^[\s\S]*?[.!?:;](\s|$)/;
     let m;
@@ -440,6 +499,7 @@ $('orb').addEventListener('click', () => {
   if (st === 'ouvindo') { ativo = false; pararOuvir(); setSt('parado'); legenda(''); manterTela(false); return; }
   if (st === 'pensando') { if (ctl) ctl.abort(); calar(); ativo = true; ouvir(); return; }
   if (st === 'falando') { calar(); streamFim = true; if (ctl) ctl.abort(); ativo = true; ouvir(); }
+  // tocar continua funcionando, mas não é preciso: ele escuta sozinho
 });
 $('bPausa').addEventListener('click', () => { ativo = false; pararOuvir(); calar(); if (ctl) ctl.abort(); setSt('parado'); legenda(''); manterTela(false); });
 $('bNova').addEventListener('click', () => { if (st === 'pensando') return; ativo = false; pararOuvir(); calar(); msgs = []; salvarMsgs(); renderMsgs(); legenda(''); aviso(''); setSt('parado'); });
@@ -472,7 +532,7 @@ $('rNova').addEventListener('click', () => { msgs = []; salvarMsgs(); renderMsgs
 /* ---------- folhas ---------- */
 function abrir(qual){
   if (qual === 'ajustes') {
-    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aTom').value = tom; $('aTomTxt').textContent = tom.toFixed(2).replace('.', ',');
+    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aEsp').value = espera; $('aEspTxt').textContent = seg(); $('aPorCima').checked = porCima;
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
     $('fAjustes').hidden = false;
@@ -485,26 +545,27 @@ document.addEventListener('click', e => {
 });
 $('bAjustes').addEventListener('click', () => abrir('ajustes'));
 $('aVel').addEventListener('input', e => { $('aVelTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
-$('aTom').addEventListener('input', e => { $('aTomTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
+$('aEsp').addEventListener('input', e => { $('aEspTxt').textContent = String(Number(e.target.value)).replace('.', ','); });
 $('aColar').addEventListener('click', async () => {
   try { const t = await navigator.clipboard.readText(); if (t) $('aCtx').value = t; }
   catch (e) { $('aCtxInfo').textContent = 'O navegador não deixou colar por aqui. Toque e segure dentro da caixa e escolha Colar.'; }
 });
 $('aSalvar').addEventListener('click', () => {
-  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; vozNome = $('aVoz').value;
+  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 1.05; vozNome = $('aVoz').value;
+  espera = Number($('aEsp').value) || 2.5; porCima = $('aPorCima').checked; LS.set('mv-espera', String(espera)); LS.set('mv-porcima', porCima ? '1' : '0');
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
-  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-tom', String(tom)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
+  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
   $('aOk').hidden = false; renderCtx(); renderCusto();
   setTimeout(fechar, 500);
 });
 $('aTeste').addEventListener('click', () => {
   if (!fala) { $('aCtxInfo').textContent = 'Este navegador não tem voz.'; return; }
-  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; calar();
+  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05; calar();
   enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
 });
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-tom', 'mv-modelo'].forEach(LS.del);
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima'].forEach(LS.del);
   key = ''; ctx = ''; ctxEm = ''; msgs = []; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
