@@ -222,7 +222,9 @@ const PRECO = {
 };
 const VOZ_REGRAS = [
   'CONVERSA POR VOZ. Isto vale acima de qualquer formato pedido antes: a sua resposta vai ser falada em voz alta por um sintetizador de voz, numa conversa ao vivo.',
-  'Fale como numa ligação com alguém de confiança: frases curtas e completas, português do Brasil natural. Nada de listas, rótulos, markdown, asteriscos, emojis ou símbolos. Escreva valores como se fala: "240 reais", "dia 8 de novembro".',
+  'Fale como um amigo próximo numa ligação: jeito leve, caloroso e espontâneo, português do Brasil do dia a dia, com um toque carioca sem exagerar na gíria. Use "tá", "pra", "a gente" e reações curtas como "pois é", "entendi", "olha só", "caramba", quando couberem de verdade, sem repetir a mesma em toda resposta. Continue honesto e direto como mentor.',
+  'A voz não sabe rir: nunca escreva risada, como "haha", "kkk" ou "risos". Quando algo for engraçado, mostre com palavras, como "essa foi boa".',
+  'Frases curtas e completas. Nada de listas, rótulos, markdown, asteriscos, emojis ou símbolos. Escreva valores como se fala: "240 reais", "dia 8 de novembro".',
   'Até 70 palavras por resposta, uma ideia por vez. Se o assunto pedir mais, diga o principal e pergunte se ele quer o resto. Termine com uma pergunta só quando ela fizer a conversa andar.',
   'O que ele diz chega por transcrição de voz e pode vir com palavras trocadas ou sem pontuação. Entenda pelo sentido e confirme valor, nome e data antes de tratar como fato.',
   'Daqui você não altera nada no sistema. Quando ele pedir uma mudança, como um pagamento, uma dívida, a agenda ou um lead, confirme em uma frase o que entendeu e diga que isso vai no resumo para a Cabine. Não escreva bloco de mudanças.',
@@ -390,11 +392,11 @@ function pararOuvir(){ clearTimeout(silT); if (rec) { const r = rec; rec = null;
 function vozEscolhida(){
   if (!fala) return null;
   const vs = fala.getVoices(), br = vs.filter(v => /pt[-_]BR/i.test(v.lang));
-  // sem escolha salva, prefere uma voz masculina pt-BR, de preferência as naturais (perto da voz Andre aprovada no Voice Studio)
-  const masc = /Antonio|Ant[oô]nio|Felipe|Daniel|Donato|Fabio|F[aá]bio|Julio|J[uú]lio|Nicolau|Valerio|Val[eé]rio|Humberto|male|masculin/i;
-  return vs.find(v => v.name === vozNome) || br.find(v => masc.test(v.name) && /natural|online|enhanced|premium/i.test(v.name)) || br.find(v => masc.test(v.name)) || br[0] || vs.find(v => /^pt/i.test(v.lang)) || null;
+  // padrão: Antonio Natural (Edge); sem ela, outra voz masculina pt-BR, de preferência natural
+  const masc = /Antonio|Ant[oô]nio|Felipe|Daniel|Donato|Fabio|F[aá]bio|Julio|J[uú]lio|Nicolau|Valerio|Val[eé]rio|Humberto|male|masculin/i, nat = /natural|online|enhanced|premium/i;
+  return vs.find(v => v.name === vozNome) || br.find(v => /Ant[oô]nio/i.test(v.name) && nat.test(v.name)) || br.find(v => masc.test(v.name) && nat.test(v.name)) || br.find(v => masc.test(v.name)) || br[0] || vs.find(v => /^pt/i.test(v.lang)) || null;
 }
-function limparFala(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
+function limparFala(s){ return s.replace(/\b(?:(?:ha|he|hi|rs){2,}|k{3,}|risos)\b/gi, '').replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').replace(/\s*,(\s*,)+/g, ',').replace(/\s+([,.!?])/g, '$1').trim(); }
 function enfileirar(frase){
   const t = limparFala(frase); if (!t || !fala) return;
   const u = new SpeechSynthesisUtterance(t);
@@ -472,12 +474,17 @@ async function enviar(texto){
   ctl = new AbortController(); streamFim = false;
   let falado = 0, resp = ''; falaAtual = '';
   const enviarFrases = (tudo, final) => {
-    // fala frase a frase enquanto a resposta chega
+    // fala enquanto a resposta chega: a primeira frase sai logo, as seguintes em blocos maiores para não picotar a fala
     falaAtual = tudo;
     let resto = tudo.slice(falado);
-    const re = /^[\s\S]*?[.!?:;](\s|$)/;
-    let m;
-    while ((m = resto.match(re)) && m[0].trim().length >= 12) { enfileirar(m[0]); falado += m[0].length; resto = tudo.slice(falado); }
+    const re = /[.!?:;](\s|$)/g;
+    for (;;) {
+      const min = falado === 0 ? 12 : 90;
+      let fim = -1, m; re.lastIndex = 0;
+      while ((m = re.exec(resto))) { fim = m.index + m[0].length; if (resto.slice(0, fim).trim().length >= min) break; }
+      if (fim < 0 || resto.slice(0, fim).trim().length < min) break;
+      enfileirar(resto.slice(0, fim)); falado += fim; resto = tudo.slice(falado);
+    }
     if (final && resto.trim()) { enfileirar(resto); falado = tudo.length; }
   };
   try {
