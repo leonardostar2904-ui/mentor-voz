@@ -145,7 +145,7 @@ details.conv > :not(summary){padding:0 16px 14px}
   <section class="palco">
     <button type="button" class="orb" id="orb" aria-label="Conversar"><canvas id="fio" aria-hidden="true"></canvas></button>
     <p class="estado" id="estado" aria-live="polite">Toque para conversar</p>
-    <p class="dica" id="dica"></p>
+    <p class="dica" id="dica" aria-live="polite"></p>
     <p class="legenda" id="legenda"></p>
     <div class="aviso" id="aviso" role="alert" hidden></div>
   </section>
@@ -298,12 +298,13 @@ const CONVERSA = {
   fimRapidoMinimo: 1.2,       // ...mas nunca antes de 1,2 s de silêncio
   fimExtraConectivo: 1.0,     // frase parada em "e", "mas", "que", "pra": espera 1 s a mais
   continuarMs: 8000,          // fala dele até 8 s depois do envio conta como continuação da mesma frase
-  continuarFalando: true,     // vale também com a resposta já tocando, se o que foi enviado parou no meio (conectivo, vírgula)
+  continuarFalando: true,     // vale também com a resposta já tocando, se o que foi enviado parou num conectivo ou vírgula...
+  continuarFalandoMs: 2000,   // ...e a voz dele começou há menos de 2 s; depois disso é interrupção e fica o que ele ouviu
   interrupcaoRapidaMs: 1000,  // interrupção no primeiro segundo de fala conta como provável acidente
   primeiraFraseMin: 12,       // a primeira frase vai sozinha para a voz, mesmo curta
   demaisFrasesMin: 40,        // com voz clonada, as seguintes vão em trechos maiores
   medicoesGuardadas: 40,      // quantos turnos o painel Desempenho guarda
-  historicoMax: 24,           // falas mandadas a cada turno; a janela anda de 12 em 12 para o cache do histórico durar
+  historicoMax: 24,           // mínimo de falas mandadas a cada turno (de 24 a 35); a janela anda de 12 em 12 para o cache durar
   quadrosOuvindo: 66,         // esfera a uns 15 quadros/s enquanto só escuta, para poupar bateria (30 nos outros estados)
   frasesAdiante: 2            // ElevenLabs: quantas frases pedir à frente da que está tocando
 };
@@ -560,7 +561,9 @@ function esperaAgora(t){
   if (CONECTIVOS.test(n) || /(\.\.\.|…|,)\s*$/.test(t)) return FIM_DE_FALA.longo();
   return ultimoFinal ? FIM_DE_FALA.rapido() : FIM_DE_FALA.normal();
 }
-const pareceIncompleta = t => CONECTIVOS.test(norm(t)) || /(\.\.\.|…|,)\s*$/.test(t);
+// parou no meio de verdade: termina numa palavra que liga a próxima ("e", "que", "pra", "em") ou em vírgula
+const LIGA = /\b(e|ou|mas|que|de|da|do|das|dos|em|no|na|nos|nas|pra|pro|para|com|sem|por|porque|pois|se|quando|como|onde|um|uma|meu|minha|seu|sua|tipo)$/;
+const pareceIncompleta = t => LIGA.test(norm(t)) || /(\.\.\.|…|,)\s*$/.test(t);
 function armarSilencio(){
   clearTimeout(silT);
   const espere = esperaAgora(texto);
@@ -594,7 +597,8 @@ function ligarMic(){
       if (!porCima) return;
       const t0 = juntar(e.results, ini);
       if (ehEco(t0)) return;
-      if (CONVERSA.continuarFalando && performance.now() - enviadoEm < CONVERSA.continuarMs && pareceIncompleta(enviadoAgora)
+      const tocando0 = turno && turno.m.playback_started != null ? performance.now() - turno.m.playback_started : 0;
+      if (CONVERSA.continuarFalando && performance.now() - enviadoEm < CONVERSA.continuarMs && tocando0 < CONVERSA.continuarFalandoMs && pareceIncompleta(enviadoAgora)
         && norm(t0).split(' ').filter(w => w.length >= 2).length >= 2) continuarFala(ini);   // estava completando a frase
       else { desde = ini; base = ''; interromper(); }       // falou por cima: o Mentor para na hora e passa a escutar
     }
@@ -674,12 +678,22 @@ function falarNavegador(t, fim, aoIniciar){
   u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = Math.min(1.6, vel * tom().vel); u.pitch = tom().alt;
   let feito = false, limite = null;
   const acabou = () => { if (feito) return; feito = true; clearTimeout(limite); fim(); };
-  u.onstart = () => { marca('first_audio_chunk'); aoComecarFala(); if (aoIniciar) aoIniciar(); }; u.onend = u.onerror = acabou;
-  limite = setTimeout(acabou, 3000 + t.length * 100 / u.rate);   // cerca do dobro do tempo normal de uma fala
+  u.onstart = () => {
+    // o tempo-limite só conta a partir de quando a frase começa a tocar, nunca enquanto espera na fila
+    clearTimeout(limite); limite = setTimeout(() => { acabou(); vozTravou(); }, 3000 + t.length * 100 / u.rate);   // cerca do dobro do normal
+    marca('first_audio_chunk'); aoComecarFala(); if (aoIniciar) aoIniciar();
+  };
+  u.onend = u.onerror = acabou;
   falaViva = u;                                                  // o Chrome pode perder o fim de uma fala que ninguém segura
   fala.speak(u);
 }
 let falaViva = null;
+function vozTravou(){
+  // a voz do sistema parou sem avisar (Android com a tela apagada): limpa a fila dela e, se nada mais vier, encerra a fala
+  const g = geracao;
+  try { fala.cancel(); } catch (e) {}
+  setTimeout(() => { if (g !== geracao || falandoN <= 0 || tocando || (fala && (fala.speaking || fala.pending))) return; falandoN = 0; depoisDeFalar(); }, 1500);
+}
 function textoVS(t){
   if (vsMotor !== 'omnivoice') return t.replace(/\[(?!pause\b)[^\]]{1,30}\]/gi, ' ').replace(/\s+/g, ' ').trim();
   return t.replace(/\[(laughs?|chuckles?|laughter|giggles?)\]/gi, '[laughter]').replace(/\[(sighs?|sigh)\]/gi, '[sigh]')
@@ -835,7 +849,7 @@ async function chamar(mensagens, opts){
     thinking: {type: modelo === 'claude-haiku-5-5' ? 'disabled' : 'between_tools'},
     output_config: {effort: 'medium'},
     system: [{type:'text', text: sistema(), cache_control: {type:'ephemeral'}}],
-    cache_control: {type:'ephemeral'},   // cache automático do histórico, além do marcador no system
+    ...(opts.semCacheHist ? {} : {cache_control: {type:'ephemeral'}}),   // cache automático do histórico, além do marcador no system
     messages: mensagens
   };
   marca('request_started');
@@ -916,7 +930,7 @@ async function enviar(texto, escrito){
   try {
     // cada fala vai com a sua própria hora, sempre igual: assim o começo do histórico se repete e o cache vale.
     // A janela anda de 12 em 12 falas (e não de 2 em 2), para o começo não mudar a cada turno.
-    const N = msgs.length, passo = CONVERSA.historicoMax / 2, ini = N > CONVERSA.historicoMax ? Math.ceil((N - CONVERSA.historicoMax) / passo) * passo : 0;
+    const N = msgs.length, passo = CONVERSA.historicoMax / 2, ini = N > CONVERSA.historicoMax ? Math.floor((N - CONVERSA.historicoMax) / passo) * passo : 0;
     const hist = msgs.slice(ini).map(x => ({role:x.role, content: x.role === 'user' && x.agora ? '[agora: ' + x.agora + ']\n' + x.content : x.content}));
     while (hist.length && hist[0].role !== 'user') hist.shift();
     resp = await chamar(hist, {signal: meuCtl.signal, max: 900, onText: t => { if (meuCtl !== ctl) return; if (meuTurno === turno) marca('first_text_token'); resp = t; enviarFrases(t, false); }});
@@ -991,11 +1005,11 @@ $('bResumo').addEventListener('click', async () => {
     hist.push({role:'user', content:pedido});
     const meuCtl = ctl = new AbortController(); streamFim = true;
     try {
-      const txt = await chamar(hist, {signal: meuCtl.signal, max: 1400, onText: t => { $('rTxt').value = t; }});
+      const txt = await chamar(hist, {signal: meuCtl.signal, max: 1400, semCacheHist: true, onText: t => { $('rTxt').value = t; }});
       $('rTxt').value = txt.trim(); $('rOk').hidden = true; resumoDe = versaoMsgs; abrir('resumo');
     } finally { if (ctl === meuCtl) ctl = null; }
   } catch (e) { aviso(e.name === 'AbortError' ? '' : (e.message || 'Não consegui escrever o resumo.')); }
-  finally { if (!ativo) { setSt('parado'); manterTela(false); } }   // se ele tocou na esfera para cancelar, a sessão segue
+  finally { if (!ativo && !ctl) { setSt('parado'); manterTela(false); } }   // se ele cancelou pela esfera ou escreveu, a sessão segue
 });
 $('rCopiar').addEventListener('click', async () => {
   const t = $('rTxt').value;
@@ -1016,15 +1030,14 @@ function abrir(qual){
     $('fAjustes').hidden = false;
   } else $('fResumo').hidden = false;
   // folha aberta: o foco vai para ela e o fundo sai do alcance do teclado e do leitor de tela
-  if (!focoAntes) focoAntes = document.activeElement;
   $('app').inert = true;
-  $(qual === 'ajustes' ? 'fAjustes' : 'fResumo').querySelector('h2').focus();
+  if (!focoAntes) { focoAntes = document.activeElement; $(qual === 'ajustes' ? 'fAjustes' : 'fResumo').querySelector('h2').focus(); }   // já aberta: não rola para o topo
 }
 let focoAntes = null;
 function fechar(){
   $('fAjustes').hidden = true; $('fResumo').hidden = true; $('app').inert = false;
   const f = focoAntes; focoAntes = null;
-  if (f && f.focus && !f.disabled && document.contains(f)) f.focus(); else $('orb').focus({preventScroll: true});
+  if (f && f !== document.body && f.focus && !f.disabled && document.contains(f)) f.focus(); else $('orb').focus({preventScroll: true});
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && (!$('fAjustes').hidden || !$('fResumo').hidden)) fechar(); });
 function renderDesempenho(){
@@ -1165,6 +1178,7 @@ $('aApagar').addEventListener('click', () => {
   renderMsgs(); renderCtx(); renderCusto();
   abrir('ajustes');   // reabre os campos já vazios, para "Salvar" não gravar nada de volta
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false; $('aElInfo').textContent = ''; $('aVsInfo').textContent = '';
+  $('aApagarOk').scrollIntoView({block: 'nearest'});
 });
 function preencherVozes(){
   const sel = $('aVoz'); if (!fala) { sel.innerHTML = '<option>Sem voz neste navegador</option>'; return; }
