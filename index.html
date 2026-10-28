@@ -790,7 +790,11 @@ const ERROS = {
 };
 async function chamar(mensagens, opts){
   const corpo = {
-    model: modelo, max_tokens: opts.max || 500, stream: true,
+    model: modelo, max_tokens: opts.max || 1000, stream: true,
+    // conversa ao vivo: sem pensamento antes de responder. Os modelos 5.5 pensam por padrão e esse pensamento conta no limite
+    // de tokens; com limite curto a resposta saía vazia. Esforço médio é o indicado para conversa sensível a demora.
+    thinking: {type: modelo === 'claude-haiku-5-5' ? 'disabled' : 'between_tools'},
+    output_config: {effort: 'medium'},
     system: [{type:'text', text: sistema(), cache_control: {type:'ephemeral'}}],
     messages: mensagens
   };
@@ -806,7 +810,7 @@ async function chamar(mensagens, opts){
     throw new Error(msg);
   }
   const leitor = r.body.getReader(), dec = new TextDecoder();
-  let buf = '', texto = '', uso = {};
+  let buf = '', texto = '', uso = {}, parada = '';
   for (;;) {
     const {value, done} = await leitor.read();
     if (done) break;
@@ -819,11 +823,16 @@ async function chamar(mensagens, opts){
       let ev; try { ev = JSON.parse(dl.slice(5)); } catch (e) { continue; }
       if (ev.type === 'message_start' && ev.message && ev.message.usage) Object.assign(uso, ev.message.usage);
       else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') { texto += ev.delta.text; if (opts.onText) opts.onText(texto, ev.delta.text); }
-      else if (ev.type === 'message_delta' && ev.usage) Object.assign(uso, ev.usage);
+      else if (ev.type === 'message_delta') { if (ev.usage) Object.assign(uso, ev.usage); if (ev.delta && ev.delta.stop_reason) parada = ev.delta.stop_reason; }
       else if (ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Erro durante a resposta.');
     }
   }
   somarCusto(uso);
+  if (!texto.trim()) {
+    // nada de texto: não finge que respondeu
+    const er = new Error(parada === 'refusal' ? 'O Mentor não pode responder a esse pedido. Tente dizer de outro jeito.' : 'O Mentor não conseguiu montar a resposta desta vez. Pode repetir?');
+    er.semTexto = true; er.parada = parada || 'vazio'; throw er;
+  }
   return texto;
 }
 
@@ -857,15 +866,20 @@ async function enviar(texto){
     const hist = msgs.slice(-24).map(x => ({role:x.role, content:x.content}));
     while (hist.length && hist[0].role !== 'user') hist.shift();
     hist[hist.length - 1] = {role:'user', content: '[agora: ' + agoraTxt() + ']\n' + hist[hist.length - 1].content};
-    resp = await chamar(hist, {signal: meuCtl.signal, max: 450, onText: t => { if (meuTurno === turno) marca('first_text_token'); resp = t; enviarFrases(t, false); }});
+    resp = await chamar(hist, {signal: meuCtl.signal, max: 900, onText: t => { if (meuTurno === turno) marca('first_text_token'); resp = t; enviarFrases(t, false); }});
     if (meuCtl !== ctl) return;
     streamFim = true; enviarFrases(resp, true);
-    msgs.push({role:'assistant', content: resp.trim() || '(sem resposta)'}); respIdx = msgs.length - 1; salvarMsgs(); renderMsgs();
+    msgs.push({role:'assistant', content: resp.trim()}); respIdx = msgs.length - 1; salvarMsgs(); renderMsgs();
     if (!fala || falandoN === 0) depoisDeFalar();
   } catch (e) {
     if (e.name === 'AbortError') {
       // cancelado: se foi interrupção com fala já tocada, guarda só o que ele ouviu
       if (meuTurno && meuTurno.interrompido && ouvido) { msgs.push({role:'assistant', content: ouvido + ' [interrompido: ele não ouviu o resto]'}); salvarMsgs(); renderMsgs(); }
+    } else if (e.semTexto) {
+      // resposta vazia: avisa, guarda a fala dele e volta a ouvir sem derrubar a sessão
+      streamFim = true;
+      if (meuTurno === turno) { marca('error_occurred'); fecharTurno({erro: 'sem texto: ' + e.parada}); }
+      calar(); aviso(e.message); if (ativo) ouvir(); else setSt('parado');
     } else {
       streamFim = true;
       if (meuTurno === turno) { marca('error_occurred'); fecharTurno({erro: String(e.message || 'falha').slice(0, 80)}); }
