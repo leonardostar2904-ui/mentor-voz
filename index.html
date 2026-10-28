@@ -156,9 +156,27 @@ details.conv summary::-webkit-details-marker{display:none}
       <div class="linha"><button type="button" class="btn ghost" id="aColar">Colar da área de transferência</button></div>
       <small id="aCtxInfo"></small>
     </div>
-    <div class="campo bloco">
-      <span class="cap">Voz natural · ElevenLabs</span>
-      <small>Com isso ele fala com entonação, ri e suspira, na voz que você escolher. Sem isso, usa a voz do navegador.</small>
+    <div class="campo">
+      <label for="aProv">Voz do Mentor</label>
+      <select id="aProv">
+        <option value="vs">VoiceStudio no meu computador · grátis, sua voz clonada</option>
+        <option value="el">ElevenLabs · pago</option>
+        <option value="">Voz do navegador · simples</option>
+      </select>
+    </div>
+    <div class="campo bloco" id="blocoVS">
+      <span class="cap">VoiceStudio</span>
+      <small>Funciona com o VoiceStudio aberto neste mesmo computador. No celular, ele usa a voz do navegador.</small>
+      <label for="aVsUrl">Endereço do VoiceStudio</label>
+      <input id="aVsUrl" type="text" spellcheck="false" autocomplete="off" value="http://127.0.0.1:3900">
+      <div class="linha"><button type="button" class="btn ghost" id="aVsBuscar">Buscar minhas vozes</button></div>
+      <label for="aVsVoz">Voz do VoiceStudio</label>
+      <select id="aVsVoz"><option value="">Busque as vozes primeiro</option></select>
+      <small id="aVsInfo"></small>
+    </div>
+    <div class="campo bloco" id="blocoEL">
+      <span class="cap">ElevenLabs</span>
+      <small>Precisa de plano pago para clonar voz.</small>
       <label for="aElKey">Chave da ElevenLabs</label>
       <input id="aElKey" type="password" autocomplete="off" spellcheck="false" placeholder="Fica só neste aparelho">
       <div class="linha"><button type="button" class="btn ghost" id="aElBuscar">Buscar minhas vozes</button></div>
@@ -241,6 +259,10 @@ const VOZ_REGRAS = [
   'Daqui você não altera nada no sistema. Quando ele pedir uma mudança, como um pagamento, uma dívida, a agenda ou um lead, confirme em uma frase o que entendeu e diga que isso vai no resumo para a Cabine. Não escreva bloco de mudanças.',
   'Não use travessão, reticências nem ponto de exclamação.'
 ].join('\n');
+const VOZ_EMOCAO_VS = [
+  'A sua voz agora é natural e entende só estas marcações entre colchetes: [laughter] para uma risada, [sigh] para um suspiro e [pause 500ms] para uma pausa curta. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nenhuma outra marcação, e nunca escreva risada como texto, como haha ou kkk.',
+  'Fale como gente numa conversa: pode começar com "olha", "pô", "caramba", "então", e variar o ritmo com frases curtas e algumas mais longas. Reticências e vírgulas ajudam a entonação aqui, pode usar. Sem exagero e sem forçar sotaque.'
+].join('\n');
 const VOZ_EMOCAO = [
   'A sua voz agora é natural e entende marcações de emoção entre colchetes, em inglês: [laughs], [chuckles], [sighs], [excited], [warmly], [curious], [whispers]. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nunca escreva risada como texto, como haha ou kkk.',
   'Fale como gente numa conversa: pode começar com "olha", "pô", "caramba", "então", e variar o ritmo com frases curtas e algumas mais longas. Sem exagero e sem forçar sotaque.'
@@ -298,7 +320,7 @@ function custoHoje(){ return Number(LS.get('mv-custo-' + hoje(), '0')) || 0; }
 function renderCusto(){
   $('custoHoje').textContent = 'Hoje: US$ ' + custoHoje().toFixed(2).replace('.', ',') + ' (estimado)';
   const resta = LS.get('mv-el-resta', ''); 
-  $('modeloTxt').textContent = (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (typeof usaEL === 'function' && usaEL() && resta ? ' · voz: ' + Number(resta).toLocaleString('pt-BR') + ' créditos' : '');
+  $('modeloTxt').textContent = (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (typeof usaEL === 'function' && usaEL() ? (provedor === 'vs' ? ' · voz: VoiceStudio' : (resta ? ' · voz: ' + Number(resta).toLocaleString('pt-BR') + ' créditos' : ' · voz: ElevenLabs')) : '');
 }
 function somarCusto(u){
   const p = PRECO[modelo] || PRECO['claude-sonnet-5-5'];
@@ -413,9 +435,14 @@ function vozEscolhida(){
 function limparFala(s){ return s.replace(/\[[^\]]{1,30}\]/g, ' ').replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 function textoEL(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 let elKey = LS.get('mv-el-key', ''), elVoz = LS.get('mv-el-voz', ''), elModelo = LS.get('mv-el-modelo', 'eleven_v4_turbo');
-const usaEL = () => !!(elKey && elVoz);
+let vsUrl = LS.get('mv-vs-url', 'http://127.0.0.1:3900'), vsVoz = LS.get('mv-vs-voz', '');
+let provedor = LS.get('mv-prov', (elKey && elVoz) ? 'el' : 'vs');
+let pularNatural = false;   // depois de uma falha na sessão, segue na voz do navegador sem tentar de novo a cada frase
+const usaEL = () => !pularNatural && ((provedor === 'el' && !!(elKey && elVoz)) || (provedor === 'vs' && !!(vsUrl && vsVoz)));
 const player = new Audio(); player.preload = 'auto';
+const SILENCIO = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACAAAA/oAR0dHR0dHR0dHR0dHYmJiYmJiYmJiYmJifHx8fHx8fHx8fHx8fJaWlpaWlpaWlpaWlrGxsbGxsbGxsbGxsbHLy8vLy8vLy8vLy8vl5eXl5eXl5eXl5eXl////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQC1AAAAAAAAAP6yysejgAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NCxKMAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NAxKQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80LEowAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80DEpAAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsSjAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==';
 let filaAudio = [], tocando = false, geracao = 0, avisouEL = false;
+const nomeProv = () => provedor === 'vs' ? 'VoiceStudio' : 'ElevenLabs';
 function aoComecarFala(){
   if (st === 'pensando') setSt('falando');
   if (st === 'falando' && porCima && ativo && !rec) ligarMic();
@@ -428,7 +455,23 @@ function falarNavegador(t, fim){
   u.onstart = aoComecarFala; u.onend = u.onerror = fim;
   fala.speak(u);
 }
+function textoVS(t){
+  return t.replace(/\[(laughs?|chuckles?|laughter|giggles?)\]/gi, '[laughter]').replace(/\[(sighs?|sigh)\]/gi, '[sigh]')
+    .replace(/\[(?!laughter\]|sigh\]|pause\b)[^\]]{1,30}\]/gi, ' ').replace(/\s+/g, ' ').trim();
+}
 function pedirAudio(t){
+  if (provedor === 'vs') {
+    return fetch(vsUrl.replace(/\/+$/, '') + '/v1/audio/speech', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({model:'omnivoice', input: textoVS(t), voice: vsVoz, response_format:'mp3', language:'pt', speed: vel})
+    }).then(async r => {
+      if (!r.ok) {
+        let m = ''; try { const j = await r.json(); m = (j.error && j.error.message) || j.detail || ''; } catch (e) {}
+        throw new Error(/another website|outro site|refused/i.test(String(m)) ? 'o VoiceStudio recusou o endereço do Mentor Voz, falta liberar a origem' : ('erro ' + r.status + (m ? ': ' + String(m).slice(0, 120) : '')));
+      }
+      return r.blob();
+    }, () => { throw new Error('o VoiceStudio não respondeu, confira se ele está aberto neste computador'); });
+  }
   return fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(elVoz) + '?output_format=mp3_44100_128', {
     method:'POST', headers:{'xi-api-key': elKey, 'content-type':'application/json', 'accept':'audio/mpeg'},
     body: JSON.stringify({text: t, model_id: elModelo})
@@ -449,7 +492,8 @@ function tocarProximo(){
     if (g !== geracao) return;
     const fim = () => { if (g !== geracao) return; falaTerminou(); tocarProximo(); };
     if (!res || res.erro) {
-      if (!avisouEL) { avisouEL = true; aviso('A voz da ElevenLabs falhou (' + ((res && res.erro && res.erro.message) || 'sem resposta') + '). Usei a voz do navegador.'); }
+      if (!avisouEL) { avisouEL = true; aviso('A voz do ' + nomeProv() + ' falhou: ' + ((res && res.erro && res.erro.message) || 'sem resposta') + '. Segui na voz do navegador.'); }
+      pularNatural = true;
       falarNavegador(limparFala(it.t), fim); return;
     }
     const url = URL.createObjectURL(res);
@@ -479,7 +523,7 @@ function depoisDeFalar(){
 function calar(){ geracao++; filaAudio = []; tocando = false; try { player.pause(); } catch (e) {} if (fala) fala.cancel(); falandoN = 0; }
 
 /* ---------- conversar com o Claude ---------- */
-function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + VOZ_EMOCAO : '') + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
+function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + (provedor === 'vs' ? VOZ_EMOCAO_VS : VOZ_EMOCAO) : '') + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
 const ERROS = {
   401: 'A chave da API não foi aceita. Confira em Ajustes.',
   403: 'Esta chave não tem permissão para esse modelo.',
@@ -565,8 +609,8 @@ $('orb').addEventListener('click', () => {
     aviso(''); ativo = true; manterTela(true);
     // destrava a voz no iPhone com uma fala vazia dentro do toque
     if (fala) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; fala.speak(u); } catch (e) {} }
-    try { player.src = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACAAAA/oAR0dHR0dHR0dHR0dHYmJiYmJiYmJiYmJifHx8fHx8fHx8fHx8fJaWlpaWlpaWlpaWlrGxsbGxsbGxsbGxsbHLy8vLy8vLy8vLy8vl5eXl5eXl5eXl5eXl////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQC1AAAAAAAAAP6yysejgAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NCxKMAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NAxKQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80LEowAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80DEpAAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsSjAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=='; player.play().catch(() => {}); } catch (e) {}
-    avisouEL = false;
+    try { player.src = SILENCIO; player.play().catch(() => {}); } catch (e) {}
+    avisouEL = false; pularNatural = false;
     ouvir(); return;
   }
   if (st === 'ouvindo') { ativo = false; pararOuvir(); setSt('parado'); legenda(''); manterTela(false); return; }
@@ -609,6 +653,7 @@ function abrir(qual){
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
     $('aElKey').value = elKey; $('aElModelo').value = elModelo; marcarVozEL(); if (elKey) creditosEL();
+    $('aProv').value = provedor; $('aVsUrl').value = vsUrl; marcarVozVS(); mostrarBlocos();
     $('fAjustes').hidden = false;
   } else $('fResumo').hidden = false;
 }
@@ -629,6 +674,8 @@ $('aSalvar').addEventListener('click', () => {
   espera = Number($('aEsp').value) || 2.5; porCima = $('aPorCima').checked; LS.set('mv-espera', String(espera)); LS.set('mv-porcima', porCima ? '1' : '0');
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
+  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; pularNatural = false; avisouEL = false;
+  LS.set('mv-prov', provedor); LS.set('mv-vs-url', vsUrl); LS.set('mv-vs-voz', vsVoz);
   elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
   LS.set('mv-el-key', elKey); LS.set('mv-el-voz', elVoz); LS.set('mv-el-modelo', elModelo);
   LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
@@ -638,10 +685,38 @@ $('aSalvar').addEventListener('click', () => {
 $('aTeste').addEventListener('click', () => {
   vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05;
   elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
-  calar(); avisouEL = false; aviso('');
-  if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); setTimeout(creditosEL, 4000); }
+  provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value;
+  calar(); avisouEL = false; pularNatural = false; aviso('');
+  try { player.src = SILENCIO; player.play().catch(() => {}); } catch (e) {}
+  if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); if (provedor === 'el') setTimeout(creditosEL, 4000); }
   else if (fala) enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
   else $('aElInfo').textContent = 'Este navegador não tem voz. Use a voz da ElevenLabs.';
+});
+let vozesVS = [];
+function mostrarBlocos(){ const p = $('aProv').value; $('blocoVS').hidden = p !== 'vs'; $('blocoEL').hidden = p !== 'el'; }
+$('aProv').addEventListener('change', mostrarBlocos);
+function marcarVozVS(){
+  const sel = $('aVsVoz');
+  const lista = vozesVS.slice();
+  if (vsVoz && !lista.some(v => v.voice_id === vsVoz)) lista.push({voice_id: vsVoz, name: 'Voz salva (' + vsVoz.slice(0, 8) + ')'});
+  sel.innerHTML = lista.length ? lista.map(() => '<option></option>').join('') : '<option value="">Busque as vozes primeiro</option>';
+  lista.forEach((v, i) => { const o = sel.options[i]; o.value = v.voice_id; o.textContent = v.name + (v.language ? ' · ' + v.language : ''); });
+  if (vsVoz) sel.value = vsVoz;
+}
+$('aVsBuscar').addEventListener('click', async () => {
+  const base = ($('aVsUrl').value.trim() || 'http://127.0.0.1:3900').replace(/\/+$/, '');
+  $('aVsInfo').textContent = 'Procurando o VoiceStudio.';
+  try {
+    const r = await fetch(base + '/v1/audio/voices');
+    if (!r.ok) throw new Error('erro ' + r.status);
+    const j = await r.json();
+    vozesVS = (j.voices || j.data || []).filter(v => v.type === 'profile');
+    if (!vsVoz && vozesVS.length) vsVoz = vozesVS[0].voice_id;
+    marcarVozVS();
+    $('aVsInfo').textContent = vozesVS.length ? vozesVS.length + ' vozes suas encontradas. Escolha, toque em Testar a voz e depois em Salvar.' : 'O VoiceStudio respondeu, mas não tem voz salva. Crie a voz em Voice Cloning e busque de novo.';
+  } catch (e) {
+    $('aVsInfo').textContent = 'Não achei o VoiceStudio em ' + base + '. Confira se ele está aberto neste computador e se a linha do Mentor Voz foi colocada no arquivo de configuração dele, como no passo a passo.';
+  }
 });
 let vozesEL = [];
 function marcarVozEL(){
@@ -682,8 +757,8 @@ async function creditosEL(){
   } catch (e) {}
 }
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-el-key', 'mv-el-voz', 'mv-el-modelo', 'mv-el-resta'].forEach(LS.del);
-  key = ''; ctx = ''; ctxEm = ''; msgs = []; elKey = ''; elVoz = ''; renderMsgs(); renderCtx();
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-el-key', 'mv-el-voz', 'mv-el-modelo', 'mv-el-resta', 'mv-prov', 'mv-vs-url', 'mv-vs-voz'].forEach(LS.del);
+  key = ''; ctx = ''; ctxEm = ''; msgs = []; elKey = ''; elVoz = ''; vsVoz = ''; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
 });
