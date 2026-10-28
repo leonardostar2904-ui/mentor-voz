@@ -158,7 +158,12 @@ details.conv summary::-webkit-details-marker{display:none}
     </div>
     <div class="campo">
       <label for="aVel">Velocidade da fala: <span id="aVelTxt">1,0</span></label>
-      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="1.05">
+      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="0.95">
+    </div>
+    <div class="campo">
+      <label for="aTom">Tom da voz: <span id="aTomTxt">0,85</span></label>
+      <input id="aTom" type="range" min="0.6" max="1.2" step="0.05" value="0.85">
+      <small>Mais baixo deixa a voz mais grave. No Android a voz costuma ser uma só, então o tom é o que mais muda.</small>
     </div>
     <div class="linha">
       <button type="button" class="btn ghost" id="aTeste">Testar a voz</button>
@@ -216,7 +221,7 @@ const SEM_CONTEXTO = 'Você é o Mentor pessoal de quem usa esta página: estrat
 
 let key = LS.get('mv-key', ''), modelo = LS.get('mv-modelo', 'claude-sonnet-5-5');
 let ctx = LS.get('mv-ctx', ''), ctxEm = LS.get('mv-ctx-em', '');
-let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '1.05')) || 1.05;
+let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '0.95')) || 0.95, tom = Number(LS.get('mv-tom', '0.85')) || 0.85;
 let msgs = []; try { msgs = JSON.parse(LS.get('mv-msgs', '[]')) || []; } catch (e) { msgs = []; }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -322,14 +327,16 @@ function pararOuvir(){ if (rec) { try { rec.onend = null; rec.abort(); } catch (
 /* ---------- falar ---------- */
 function vozEscolhida(){
   if (!fala) return null;
-  const vs = fala.getVoices();
-  return vs.find(v => v.name === vozNome) || vs.find(v => /pt[-_]BR/i.test(v.lang)) || vs.find(v => /^pt/i.test(v.lang)) || null;
+  const vs = fala.getVoices(), br = vs.filter(v => /pt[-_]BR/i.test(v.lang));
+  // sem escolha salva, prefere uma voz masculina pt-BR, de preferência as naturais (perto da voz Andre aprovada no Voice Studio)
+  const masc = /Antonio|Ant[oô]nio|Felipe|Daniel|Donato|Fabio|F[aá]bio|Julio|J[uú]lio|Nicolau|Valerio|Val[eé]rio|Humberto|male|masculin/i;
+  return vs.find(v => v.name === vozNome) || br.find(v => masc.test(v.name) && /natural|online|enhanced|premium/i.test(v.name)) || br.find(v => masc.test(v.name)) || br[0] || vs.find(v => /^pt/i.test(v.lang)) || null;
 }
 function limparFala(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 function enfileirar(frase){
   const t = limparFala(frase); if (!t || !fala) return;
   const u = new SpeechSynthesisUtterance(t);
-  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel;
+  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel; u.pitch = tom;
   falandoN++;
   u.onstart = () => { if (st !== 'falando') setSt('falando'); };
   u.onend = u.onerror = () => { falandoN = Math.max(0, falandoN - 1); depoisDeFalar(); };
@@ -465,7 +472,7 @@ $('rNova').addEventListener('click', () => { msgs = []; salvarMsgs(); renderMsgs
 /* ---------- folhas ---------- */
 function abrir(qual){
   if (qual === 'ajustes') {
-    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ',');
+    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aTom').value = tom; $('aTomTxt').textContent = tom.toFixed(2).replace('.', ',');
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
     $('fAjustes').hidden = false;
@@ -478,25 +485,26 @@ document.addEventListener('click', e => {
 });
 $('bAjustes').addEventListener('click', () => abrir('ajustes'));
 $('aVel').addEventListener('input', e => { $('aVelTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
+$('aTom').addEventListener('input', e => { $('aTomTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
 $('aColar').addEventListener('click', async () => {
   try { const t = await navigator.clipboard.readText(); if (t) $('aCtx').value = t; }
   catch (e) { $('aCtxInfo').textContent = 'O navegador não deixou colar por aqui. Toque e segure dentro da caixa e escolha Colar.'; }
 });
 $('aSalvar').addEventListener('click', () => {
-  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 1.05; vozNome = $('aVoz').value;
+  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; vozNome = $('aVoz').value;
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
-  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
+  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-tom', String(tom)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
   $('aOk').hidden = false; renderCtx(); renderCusto();
   setTimeout(fechar, 500);
 });
 $('aTeste').addEventListener('click', () => {
   if (!fala) { $('aCtxInfo').textContent = 'Este navegador não tem voz.'; return; }
-  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05; calar();
+  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; calar();
   enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
 });
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo'].forEach(LS.del);
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-tom', 'mv-modelo'].forEach(LS.del);
   key = ''; ctx = ''; ctxEm = ''; msgs = []; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
