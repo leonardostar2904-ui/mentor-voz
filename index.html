@@ -553,6 +553,20 @@ function textoVS(t){
   return t.replace(/\[(laughs?|chuckles?|laughter|giggles?)\]/gi, '[laughter]').replace(/\[(sighs?|sigh)\]/gi, '[sigh]')
     .replace(/\[(?!laughter\]|sigh\]|pause\b)[^\]]{1,30}\]/gi, ' ').replace(/\s+/g, ' ').trim();
 }
+// traduz o erro da ElevenLabs para o que ele precisa fazer
+async function erroEL(r){
+  let d = {}; try { const j = await r.json(); d = (j && j.detail) || {}; if (typeof d === 'string') d = {message: d}; } catch (e) {}
+  const st = String(d.status || ''), m = String(d.message || '');
+  const NOMES = {voices_read: 'Voices (leitura)', text_to_speech: 'Text to Speech', user_read: 'User (leitura)'};
+  if (st === 'missing_permissions' || /missing the permission/i.test(m)) {
+    const p = (m.match(/permission (\w+)/i) || [])[1] || '';
+    return 'a chave não tem a permissão ' + (NOMES[p] || p || 'necessária') + '. Na ElevenLabs, em Developers, API Keys, edite a chave e libere Text to Speech, Voices (leitura) e User (leitura).';
+  }
+  if (st === 'detected_unusual_activity' || /unusual activity/i.test(m)) return 'a ElevenLabs bloqueou o plano grátis por atividade incomum, o que costuma acontecer com VPN ou proxy ligado.';
+  if (/quota|credit/i.test(st + ' ' + m)) return 'os créditos da ElevenLabs acabaram neste mês.';
+  if (r.status === 401) return 'a ElevenLabs não reconheceu a chave' + (m ? ' (' + m.slice(0, 80) + ')' : '') + '. Confira se colou a chave inteira, que começa com sk_.';
+  return 'erro ' + r.status + (m ? ': ' + m.slice(0, 120) : '');
+}
 function pedirAudio(t){
   if (provedor === 'vs') {
     return fetch(vsUrl.replace(/\/+$/, '') + '/v1/audio/speech', {
@@ -572,10 +586,7 @@ function pedirAudio(t){
     method:'POST', headers:{'xi-api-key': elKey, 'content-type':'application/json', 'accept':'audio/mpeg'},
     body: JSON.stringify({text: t, model_id: elModelo})
   }).then(async r => {
-    if (!r.ok) {
-      let m = ''; try { const j = await r.json(); m = (j.detail && (j.detail.message || j.detail.status)) || ''; } catch (e) {}
-      throw new Error(r.status === 401 ? 'chave da ElevenLabs não aceita' : /quota|credit/i.test(m) ? 'créditos da ElevenLabs acabaram' : ('erro ' + r.status + (m ? ': ' + m : '')));
-    }
+    if (!r.ok) throw new Error(await erroEL(r));
     return r.blob();
   });
 }
@@ -920,7 +931,7 @@ $('aElBuscar').addEventListener('click', async () => {
   $('aElInfo').textContent = 'Buscando suas vozes.';
   try {
     const r = await fetch('https://api.elevenlabs.io/v1/voices', {headers:{'xi-api-key': k}});
-    if (!r.ok) throw new Error(r.status === 401 ? 'A chave não foi aceita.' : 'Erro ' + r.status + '.');
+    if (!r.ok) { const er = new Error(await erroEL(r)); er.daApi = true; throw er; }
     const j = await r.json();
     // as vozes dele primeiro: a do Mentor, depois as clonadas e as criadas, depois as prontas
     const prio = v => /mentor/i.test(v.name) && v.category !== 'premade' && !/mulher/i.test(v.name) ? 0 : (v.category === 'cloned' || v.category === 'generated') ? 1 : 2;
@@ -930,7 +941,7 @@ $('aElBuscar').addEventListener('click', async () => {
     if (minha && !elVoz) { $('aElVoz').value = minha.voice_id; }
     $('aElInfo').textContent = vozesEL.length + ' vozes encontradas.' + (minha ? ' Selecionei ' + minha.name + '. Toque em Testar a voz e depois em Salvar.' : ' Nenhuma voz sua ainda.');
     creditosEL();
-  } catch (e) { $('aElInfo').textContent = 'Não consegui buscar: ' + (e.message || 'falha de conexão') + ' Se aparecer erro de conexão, a ElevenLabs pode estar bloqueando o navegador, me avise.'; }
+  } catch (e) { $('aElInfo').textContent = e.daApi ? 'Não consegui buscar: ' + e.message : 'Não consegui falar com a ElevenLabs. Confira a internet e tente de novo.'; }
 });
 async function creditosEL(){
   if (!elKey && !$('aElKey').value.trim()) return;
