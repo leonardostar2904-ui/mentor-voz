@@ -149,6 +149,14 @@ details.conv summary::-webkit-details-marker{display:none}
       </select>
     </div>
     <div class="campo">
+      <label class="chk" for="aWeb"><input type="checkbox" id="aWeb"> Pesquisar na internet quando precisar</label>
+      <small>Ele busca quando a resposta depende de algo atual, como preço, notícia, vaga ou empresa. Cada busca custa cerca de US$ 0,01.</small>
+    </div>
+    <div class="campo">
+      <label class="chk" for="aOpus"><input type="checkbox" id="aOpus"> Chamar o Opus 5.5 nas tarefas complexas</label>
+      <small>Ele decide sozinho quando a pergunta pede mais raciocínio e passa para o Opus. Demora alguns segundos a mais e custa cerca do dobro do Sonnet.</small>
+    </div>
+    <div class="campo">
       <label for="aCtx">Contexto da Cabine</label>
       <textarea id="aCtx" spellcheck="false" placeholder="Na Cabine, aba Mentor, toque em Levar para a voz e cole aqui."></textarea>
       <div class="linha"><button type="button" class="btn ghost" id="aColar">Colar da área de transferência</button></div>
@@ -218,8 +226,15 @@ const LS = {
 // preço por milhão de tokens, em dólar (página oficial de preços da Anthropic, out/2026)
 const PRECO = {
   'claude-sonnet-5-5': {in:2, out:10, lido:0.10, gravado:2.5},
-  'claude-haiku-5-5': {in:0.10, out:0.50, lido:0.01, gravado:0.125}
+  'claude-haiku-5-5': {in:0.10, out:0.50, lido:0.01, gravado:0.125},
+  'claude-opus-5-5': {in:4, out:20, lido:0.20, gravado:5}
 };
+const OPUS = 'claude-opus-5-5', BUSCA_US = 0.01;  // web search: US$ 10 por mil buscas
+const FERRAMENTAS_REGRAS = {
+  web: 'Você pode pesquisar na internet. Pesquise só quando a resposta depender de informação atual ou que você não sabe com segurança, como preço, notícia, vaga, empresa, horário ou regra em vigor. Antes de pesquisar, diga numa frase curta que vai dar uma olhada. Conte o que achou como num papo: sem ler links, endereços ou listas de fontes, e diga de onde veio só quando isso importar.',
+  opus: 'Quando o pedido for complexo de verdade, como um plano com muitas variáveis, conta com várias dívidas e prazos, estratégia de negócio, proposta, comparação difícil ou decisão importante, chame a ferramenta pensar_com_opus em vez de responder você mesmo. Antes de chamar, diga uma frase curta e natural, como "essa merece pensar com calma, me dá um segundo". Para o papo do dia a dia e perguntas simples, responda você mesmo.'
+};
+const OPUS_REGRA = 'Você foi chamado no meio da conversa porque o pedido é complexo. Pense com cuidado, mas responda falado, no mesmo jeito de amigo: até 120 palavras, o principal primeiro. Não diga que foi chamado nem fale de modelos.';
 const VOZ_REGRAS = [
   'CONVERSA POR VOZ. Isto vale acima de qualquer formato pedido antes: a sua resposta vai ser falada em voz alta por um sintetizador de voz, numa conversa ao vivo.',
   'Fale como um amigo próximo numa ligação: jeito leve, caloroso e espontâneo, português do Brasil do dia a dia, com um toque carioca sem exagerar na gíria. Use "tá", "pra", "a gente" e reações curtas como "pois é", "entendi", "olha só", "caramba", quando couberem de verdade, sem repetir a mesma em toda resposta. Continue honesto e direto como mentor.',
@@ -233,6 +248,7 @@ const VOZ_REGRAS = [
 const SEM_CONTEXTO = 'Você é o Mentor pessoal de quem usa esta página: estrategista calmo, direto e honesto. Você ainda não recebeu os dados da Cabine. Ajude com o que ele contar e lembre, uma vez só, que ele pode trazer o contexto da Cabine pelos Ajustes para você saber dos números dele.';
 
 let key = LS.get('mv-key', ''), modelo = LS.get('mv-modelo', 'claude-sonnet-5-5');
+let usarWeb = LS.get('mv-web', '1') === '1', usarOpus = LS.get('mv-opus', '1') === '1';
 let ctx = LS.get('mv-ctx', ''), ctxEm = LS.get('mv-ctx-em', '');
 let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '0.95')) || 0.95, tom = Number(LS.get('mv-tom', '0.85')) || 0.85;
 let msgs = []; try { msgs = JSON.parse(LS.get('mv-msgs', '[]')) || []; } catch (e) { msgs = []; }
@@ -282,11 +298,12 @@ function hoje(){ return new Date().toLocaleDateString('en-CA'); }
 function custoHoje(){ return Number(LS.get('mv-custo-' + hoje(), '0')) || 0; }
 function renderCusto(){
   $('custoHoje').textContent = 'Hoje: US$ ' + custoHoje().toFixed(2).replace('.', ',') + ' (estimado)';
-  $('modeloTxt').textContent = modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5';
+  $('modeloTxt').textContent = (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (usarOpus ? ' + Opus' : '') + (usarWeb ? ' · web' : '');
 }
-function somarCusto(u){
-  const p = PRECO[modelo] || PRECO['claude-sonnet-5-5'];
-  const v = ((u.input_tokens || 0) * p.in + (u.output_tokens || 0) * p.out + (u.cache_read_input_tokens || 0) * p.lido + (u.cache_creation_input_tokens || 0) * p.gravado) / 1e6;
+function somarCusto(u, m){
+  const p = PRECO[m || modelo] || PRECO['claude-sonnet-5-5'];
+  const buscas = (u.server_tool_use && u.server_tool_use.web_search_requests) || 0;
+  const v = ((u.input_tokens || 0) * p.in + (u.output_tokens || 0) * p.out + (u.cache_read_input_tokens || 0) * p.lido + (u.cache_creation_input_tokens || 0) * p.gravado) / 1e6 + buscas * BUSCA_US;
   LS.set('mv-custo-' + hoje(), String(custoHoje() + v)); renderCusto();
 }
 
@@ -428,23 +445,38 @@ const ERROS = {
   529: 'O serviço está sobrecarregado agora. Tente daqui a pouco.'
 };
 async function chamar(mensagens, opts){
+  const m = opts.modelo || modelo;
   const corpo = {
-    model: modelo, max_tokens: opts.max || 500, stream: true,
-    system: [{type:'text', text: sistema(), cache_control: {type:'ephemeral'}}],
+    model: m, max_tokens: opts.max || 500, stream: true,
+    system: [{type:'text', text: sistema() + [opts.web && FERRAMENTAS_REGRAS.web, opts.opus && FERRAMENTAS_REGRAS.opus, opts.extra].filter(Boolean).map(t => '\n\n' + t).join(''), cache_control: {type:'ephemeral'}}],
     messages: mensagens
   };
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method:'POST', signal: opts.signal,
-    headers: {'content-type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'},
-    body: JSON.stringify(corpo)
-  });
+  const tools = [];
+  if (opts.web) tools.push({type: m === 'claude-haiku-5-5' ? 'web_search_20250305' : 'web_search_20260209', name: 'web_search', max_uses: 3,
+    user_location: {type:'approximate', city:'Rio de Janeiro', region:'Rio de Janeiro', country:'BR', timezone:'America/Sao_Paulo'}});
+  if (opts.opus) tools.push({name: 'pensar_com_opus', description: 'Passa a resposta deste pedido para um modelo mais forte, que pensa com mais cuidado. Use em pedidos complexos de verdade; no papo simples, responda você mesmo.',
+    input_schema: {type:'object', properties: {motivo: {type:'string', description:'Em poucas palavras, por que o pedido é complexo.'}}, required: ['motivo'], additionalProperties: false}});
+  if (tools.length) corpo.tools = tools;
+  if (m === OPUS) corpo.output_config = {effort: 'medium'};
+  const headers = {'content-type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'};
+  // se o filtro de segurança recusar, a própria API tenta de novo no modelo recomendado (não existe para o Haiku)
+  if (m !== 'claude-haiku-5-5') { corpo.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
+  let r = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal: opts.signal, headers, body: JSON.stringify(corpo)});
+  if (r.status === 400 && (corpo.tools || corpo.fallbacks)) {
+    // a API recusou busca, Opus ou fallback (ex.: busca desligada no Console): responde sem eles e avisa
+    let det = ''; try { const j = await r.json(); det = (j && j.error && j.error.message) || ''; } catch (e) {}
+    delete corpo.tools; delete corpo.fallbacks; delete headers['anthropic-beta'];
+    corpo.system[0].text = sistema() + (opts.extra ? '\n\n' + opts.extra : '');
+    aviso('Respondi sem internet e sem Opus, porque a API recusou esses recursos' + (det ? ': ' + det : '.'));
+    r = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal: opts.signal, headers, body: JSON.stringify(corpo)});
+  }
   if (!r.ok) {
     let msg = ERROS[r.status] || ('Erro ' + r.status + ' na API.');
     try { const j = await r.json(); const m = j && j.error && j.error.message || ''; if (/credit balance/i.test(m)) msg = 'Os créditos da API acabaram ou estão baixos. Confira em console.anthropic.com.'; } catch (e) {}
     throw new Error(msg);
   }
   const leitor = r.body.getReader(), dec = new TextDecoder();
-  let buf = '', texto = '', uso = {};
+  let buf = '', texto = '', uso = {}, pedeOpus = false, fim = '';
   for (;;) {
     const {value, done} = await leitor.read();
     if (done) break;
@@ -456,13 +488,20 @@ async function chamar(mensagens, opts){
       if (!dl) continue;
       let ev; try { ev = JSON.parse(dl.slice(5)); } catch (e) { continue; }
       if (ev.type === 'message_start' && ev.message && ev.message.usage) Object.assign(uso, ev.message.usage);
+      else if (ev.type === 'content_block_start' && ev.content_block) {
+        const b = ev.content_block;
+        if (b.type === 'text' && texto && !/\s$/.test(texto)) texto += ' ';                     // texto antes e depois de uma busca
+        else if (b.type === 'server_tool_use' && b.name === 'web_search' && opts.onBusca) opts.onBusca();
+        else if (b.type === 'tool_use' && b.name === 'pensar_com_opus') pedeOpus = true;
+      }
       else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') { texto += ev.delta.text; if (opts.onText) opts.onText(texto, ev.delta.text); }
-      else if (ev.type === 'message_delta' && ev.usage) Object.assign(uso, ev.usage);
+      else if (ev.type === 'message_delta') { if (ev.usage) Object.assign(uso, ev.usage); if (ev.delta && ev.delta.stop_reason) fim = ev.delta.stop_reason; }
       else if (ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Erro durante a resposta.');
     }
   }
-  somarCusto(uso);
-  return texto;
+  somarCusto(uso, m);
+  if (fim === 'refusal' && !texto.trim()) texto = 'Esse assunto eu não consigo responder por aqui. Bora por outro caminho?';
+  return {texto, pedeOpus};
 }
 
 async function enviar(texto){
@@ -490,7 +529,16 @@ async function enviar(texto){
   try {
     const hist = msgs.slice(-24).map(m => ({role:m.role, content:m.content}));
     while (hist.length && hist[0].role !== 'user') hist.shift();
-    resp = await chamar(hist, {signal: ctl.signal, max: 450, onText: t => { resp = t; enviarFrases(t, false); }});
+    const aoBuscar = () => { if (st === 'pensando') $('dica').textContent = 'Pesquisando na internet.'; };
+    const r1 = await chamar(hist, {signal: ctl.signal, max: 2000, web: usarWeb, opus: usarOpus && modelo !== OPUS, onBusca: aoBuscar, onText: t => { resp = t; enviarFrases(t, false); }});
+    resp = r1.texto;
+    if (r1.pedeOpus) {
+      // pedido complexo: a frase de transição já está sendo falada, e o Opus responde em seguida
+      const antes = resp.trim(), sep = antes ? ' ' : '';
+      if (st === 'pensando') $('dica').textContent = 'Pensando com mais cuidado.';
+      const r2 = await chamar(hist, {signal: ctl.signal, modelo: OPUS, max: 8000, web: usarWeb, extra: OPUS_REGRA, onBusca: aoBuscar, onText: t => { resp = antes + sep + t; enviarFrases(resp, false); }});
+      resp = antes + sep + r2.texto;
+    }
     streamFim = true; enviarFrases(resp, true);
     msgs.push({role:'assistant', content: resp.trim() || '(sem resposta)'}); salvarMsgs(); renderMsgs();
     if (!fala || falandoN === 0) depoisDeFalar();
@@ -530,7 +578,7 @@ $('bResumo').addEventListener('click', async () => {
     if (hist.length && hist[hist.length - 1].role === 'user') hist.push({role:'assistant', content:'Certo.'});
     hist.push({role:'user', content:pedido});
     ctl = new AbortController(); streamFim = true;
-    const txt = await chamar(hist, {signal: ctl.signal, max: 1400, onText: t => { $('rTxt').value = t; }});
+    const txt = (await chamar(hist, {signal: ctl.signal, max: 1400, onText: t => { $('rTxt').value = t; }})).texto;
     $('rTxt').value = txt.trim(); $('rOk').hidden = true; abrir('resumo');
   } catch (e) { aviso(e.name === 'AbortError' ? '' : (e.message || 'Não consegui escrever o resumo.')); }
   finally { ctl = null; setSt('parado'); manterTela(false); }
@@ -546,7 +594,7 @@ $('rNova').addEventListener('click', () => { msgs = []; salvarMsgs(); renderMsgs
 /* ---------- folhas ---------- */
 function abrir(qual){
   if (qual === 'ajustes') {
-    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aTom').value = tom; $('aTomTxt').textContent = tom.toFixed(2).replace('.', ','); $('aEsp').value = espera; $('aEspTxt').textContent = seg(); $('aPorCima').checked = porCima;
+    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aTom').value = tom; $('aTomTxt').textContent = tom.toFixed(2).replace('.', ','); $('aEsp').value = espera; $('aEspTxt').textContent = seg(); $('aPorCima').checked = porCima; $('aWeb').checked = usarWeb; $('aOpus').checked = usarOpus;
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
     $('fAjustes').hidden = false;
@@ -568,6 +616,7 @@ $('aColar').addEventListener('click', async () => {
 $('aSalvar').addEventListener('click', () => {
   key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; vozNome = $('aVoz').value;
   espera = Number($('aEsp').value) || 2.5; porCima = $('aPorCima').checked; LS.set('mv-espera', String(espera)); LS.set('mv-porcima', porCima ? '1' : '0');
+  usarWeb = $('aWeb').checked; usarOpus = $('aOpus').checked; LS.set('mv-web', usarWeb ? '1' : '0'); LS.set('mv-opus', usarOpus ? '1' : '0');
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
   LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-tom', String(tom)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
@@ -580,7 +629,7 @@ $('aTeste').addEventListener('click', () => {
   enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
 });
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-tom', 'mv-modelo', 'mv-espera', 'mv-porcima'].forEach(LS.del);
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-tom', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-web', 'mv-opus'].forEach(LS.del);
   key = ''; ctx = ''; ctxEm = ''; msgs = []; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
