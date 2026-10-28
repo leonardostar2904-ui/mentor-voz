@@ -95,6 +95,8 @@ details.conv summary::-webkit-details-marker{display:none}
 .campo input[type=range]{padding:0;accent-color:var(--ink);background:none;border:0}
 .resumo textarea{min-height:46vh;font-size:14.5px;line-height:1.5}
 .ok{color:var(--ouve);font-size:14px}
+.bloco{border:1px solid var(--line);padding:14px;border-radius:14px;gap:8px}
+.bloco label{margin-top:6px}
 .chk{display:flex;gap:10px;align-items:center;color:var(--ink)!important;font-size:15px!important;cursor:pointer}
 .chk input{width:20px;height:20px;margin:0;accent-color:var(--ink)}
 .passos{margin:0;padding-left:20px;font-size:14.5px;display:flex;flex-direction:column;gap:6px;color:var(--mute)}
@@ -149,31 +151,34 @@ details.conv summary::-webkit-details-marker{display:none}
       </select>
     </div>
     <div class="campo">
-      <label class="chk" for="aWeb"><input type="checkbox" id="aWeb"> Pesquisar na internet quando precisar</label>
-      <small>Ele busca quando a resposta depende de algo atual, como preço, notícia, vaga ou empresa. Cada busca custa cerca de US$ 0,01.</small>
-    </div>
-    <div class="campo">
-      <label class="chk" for="aOpus"><input type="checkbox" id="aOpus"> Chamar o Opus 5.5 nas tarefas complexas</label>
-      <small>Ele decide sozinho quando a pergunta pede mais raciocínio e passa para o Opus. Demora alguns segundos a mais e custa cerca do dobro do Sonnet.</small>
-    </div>
-    <div class="campo">
       <label for="aCtx">Contexto da Cabine</label>
       <textarea id="aCtx" spellcheck="false" placeholder="Na Cabine, aba Mentor, toque em Levar para a voz e cole aqui."></textarea>
       <div class="linha"><button type="button" class="btn ghost" id="aColar">Colar da área de transferência</button></div>
       <small id="aCtxInfo"></small>
     </div>
+    <div class="campo bloco">
+      <span class="cap">Voz natural · ElevenLabs</span>
+      <small>Com isso ele fala com entonação, ri e suspira, na voz que você escolher. Sem isso, usa a voz do navegador.</small>
+      <label for="aElKey">Chave da ElevenLabs</label>
+      <input id="aElKey" type="password" autocomplete="off" spellcheck="false" placeholder="Fica só neste aparelho">
+      <div class="linha"><button type="button" class="btn ghost" id="aElBuscar">Buscar minhas vozes</button></div>
+      <label for="aElVoz">Voz da ElevenLabs</label>
+      <select id="aElVoz"><option value="">Nenhuma: usar a voz do navegador</option></select>
+      <label for="aElModelo">Modelo de voz</label>
+      <select id="aElModelo">
+        <option value="eleven_v4_turbo">v4 Turbo · rápido, com emoção</option>
+        <option value="eleven_v4">v4 · mais expressivo, mais lento</option>
+        <option value="eleven_v3">v3 · expressivo</option>
+      </select>
+      <small id="aElInfo"></small>
+    </div>
     <div class="campo">
-      <label for="aVoz">Voz</label>
+      <label for="aVoz">Voz do navegador (reserva)</label>
       <select id="aVoz"></select>
     </div>
     <div class="campo">
       <label for="aVel">Velocidade da fala: <span id="aVelTxt">1,0</span></label>
-      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="0.95">
-    </div>
-    <div class="campo">
-      <label for="aTom">Tom da voz: <span id="aTomTxt">0,85</span></label>
-      <input id="aTom" type="range" min="0.6" max="1.2" step="0.05" value="0.85">
-      <small>Mais baixo deixa a voz mais grave. No Android a voz costuma ser uma só, então o tom é o que mais muda.</small>
+      <input id="aVel" type="range" min="0.8" max="1.4" step="0.05" value="1.05">
     </div>
     <div class="campo">
       <label for="aEsp">Espera depois que você para de falar: <span id="aEspTxt">2,5</span> segundos</label>
@@ -226,31 +231,25 @@ const LS = {
 // preço por milhão de tokens, em dólar (página oficial de preços da Anthropic, out/2026)
 const PRECO = {
   'claude-sonnet-5-5': {in:2, out:10, lido:0.10, gravado:2.5},
-  'claude-haiku-5-5': {in:0.10, out:0.50, lido:0.01, gravado:0.125},
-  'claude-opus-5-5': {in:4, out:20, lido:0.20, gravado:5}
+  'claude-haiku-5-5': {in:0.10, out:0.50, lido:0.01, gravado:0.125}
 };
-const OPUS = 'claude-opus-5-5', BUSCA_US = 0.01;  // web search: US$ 10 por mil buscas
-const FERRAMENTAS_REGRAS = {
-  web: 'Você pode pesquisar na internet. Pesquise só quando a resposta depender de informação atual ou que você não sabe com segurança, como preço, notícia, vaga, empresa, horário ou regra em vigor. Antes de pesquisar, diga numa frase curta que vai dar uma olhada. Conte o que achou como num papo: sem ler links, endereços ou listas de fontes, e diga de onde veio só quando isso importar.',
-  opus: 'Quando o pedido for complexo de verdade, como um plano com muitas variáveis, conta com várias dívidas e prazos, estratégia de negócio, proposta, comparação difícil ou decisão importante, chame a ferramenta pensar_com_opus em vez de responder você mesmo. Antes de chamar, diga uma frase curta e natural, como "essa merece pensar com calma, me dá um segundo". Para o papo do dia a dia e perguntas simples, responda você mesmo.'
-};
-const OPUS_REGRA = 'Você foi chamado no meio da conversa porque o pedido é complexo. Pense com cuidado, mas responda falado, no mesmo jeito de amigo: até 120 palavras, o principal primeiro. Não diga que foi chamado nem fale de modelos.';
 const VOZ_REGRAS = [
   'CONVERSA POR VOZ. Isto vale acima de qualquer formato pedido antes: a sua resposta vai ser falada em voz alta por um sintetizador de voz, numa conversa ao vivo.',
-  'Fale como um amigo próximo numa ligação: jeito leve, caloroso e espontâneo, português do Brasil do dia a dia, com um toque carioca sem exagerar na gíria. Use "tá", "pra", "a gente" e reações curtas como "pois é", "entendi", "olha só", "caramba", quando couberem de verdade, sem repetir a mesma em toda resposta. Continue honesto e direto como mentor.',
-  'A voz não sabe rir: nunca escreva risada, como "haha", "kkk" ou "risos". Quando algo for engraçado, mostre com palavras, como "essa foi boa".',
-  'Frases curtas e completas. Nada de listas, rótulos, markdown, asteriscos, emojis ou símbolos. Escreva valores como se fala: "240 reais", "dia 8 de novembro".',
+  'Fale como numa ligação com alguém de confiança: frases curtas e completas, português do Brasil natural. Nada de listas, rótulos, markdown, asteriscos, emojis ou símbolos. Escreva valores como se fala: "240 reais", "dia 8 de novembro".',
   'Até 70 palavras por resposta, uma ideia por vez. Se o assunto pedir mais, diga o principal e pergunte se ele quer o resto. Termine com uma pergunta só quando ela fizer a conversa andar.',
   'O que ele diz chega por transcrição de voz e pode vir com palavras trocadas ou sem pontuação. Entenda pelo sentido e confirme valor, nome e data antes de tratar como fato.',
   'Daqui você não altera nada no sistema. Quando ele pedir uma mudança, como um pagamento, uma dívida, a agenda ou um lead, confirme em uma frase o que entendeu e diga que isso vai no resumo para a Cabine. Não escreva bloco de mudanças.',
   'Não use travessão, reticências nem ponto de exclamação.'
 ].join('\n');
+const VOZ_EMOCAO = [
+  'A sua voz agora é natural e entende marcações de emoção entre colchetes, em inglês: [laughs], [chuckles], [sighs], [excited], [warmly], [curious], [whispers]. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nunca escreva risada como texto, como haha ou kkk.',
+  'Fale como gente numa conversa: pode começar com "olha", "pô", "caramba", "então", e variar o ritmo com frases curtas e algumas mais longas. Sem exagero e sem forçar sotaque.'
+].join('\n');
 const SEM_CONTEXTO = 'Você é o Mentor pessoal de quem usa esta página: estrategista calmo, direto e honesto. Você ainda não recebeu os dados da Cabine. Ajude com o que ele contar e lembre, uma vez só, que ele pode trazer o contexto da Cabine pelos Ajustes para você saber dos números dele.';
 
 let key = LS.get('mv-key', ''), modelo = LS.get('mv-modelo', 'claude-sonnet-5-5');
-let usarWeb = LS.get('mv-web', '1') === '1', usarOpus = LS.get('mv-opus', '1') === '1';
 let ctx = LS.get('mv-ctx', ''), ctxEm = LS.get('mv-ctx-em', '');
-let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '0.95')) || 0.95, tom = Number(LS.get('mv-tom', '0.85')) || 0.85;
+let vozNome = LS.get('mv-voz', ''), vel = Number(LS.get('mv-vel', '1.05')) || 1.05;
 let msgs = []; try { msgs = JSON.parse(LS.get('mv-msgs', '[]')) || []; } catch (e) { msgs = []; }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -289,7 +288,7 @@ function renderMsgs(){
   box.innerHTML = msgs.map(m => m.role === 'user'
     ? '<div class="msg"><span class="cap">Você</span><div class="q"></div></div>'
     : '<div class="msg"><span class="cap">Mentor</span><div class="a"></div></div>').join('');
-  [...box.children].forEach((el, i) => { el.lastElementChild.textContent = msgs[i].content; });
+  [...box.children].forEach((el, i) => { el.lastElementChild.textContent = msgs[i].role === 'assistant' ? limparFala(msgs[i].content) : msgs[i].content; });
   $('convSum').textContent = msgs.length ? 'Ver a conversa (' + msgs.length + ' falas)' : 'Ver a conversa';
   box.scrollTop = box.scrollHeight;
 }
@@ -298,12 +297,12 @@ function hoje(){ return new Date().toLocaleDateString('en-CA'); }
 function custoHoje(){ return Number(LS.get('mv-custo-' + hoje(), '0')) || 0; }
 function renderCusto(){
   $('custoHoje').textContent = 'Hoje: US$ ' + custoHoje().toFixed(2).replace('.', ',') + ' (estimado)';
-  $('modeloTxt').textContent = (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (usarOpus ? ' + Opus' : '') + (usarWeb ? ' · web' : '');
+  const resta = LS.get('mv-el-resta', ''); 
+  $('modeloTxt').textContent = (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (typeof usaEL === 'function' && usaEL() && resta ? ' · voz: ' + Number(resta).toLocaleString('pt-BR') + ' créditos' : '');
 }
-function somarCusto(u, m){
-  const p = PRECO[m || modelo] || PRECO['claude-sonnet-5-5'];
-  const buscas = (u.server_tool_use && u.server_tool_use.web_search_requests) || 0;
-  const v = ((u.input_tokens || 0) * p.in + (u.output_tokens || 0) * p.out + (u.cache_read_input_tokens || 0) * p.lido + (u.cache_creation_input_tokens || 0) * p.gravado) / 1e6 + buscas * BUSCA_US;
+function somarCusto(u){
+  const p = PRECO[modelo] || PRECO['claude-sonnet-5-5'];
+  const v = ((u.input_tokens || 0) * p.in + (u.output_tokens || 0) * p.out + (u.cache_read_input_tokens || 0) * p.lido + (u.cache_creation_input_tokens || 0) * p.gravado) / 1e6;
   LS.set('mv-custo-' + hoje(), String(custoHoje() + v)); renderCusto();
 }
 
@@ -408,33 +407,79 @@ function pararOuvir(){ clearTimeout(silT); if (rec) { const r = rec; rec = null;
 /* ---------- falar ---------- */
 function vozEscolhida(){
   if (!fala) return null;
-  const vs = fala.getVoices(), br = vs.filter(v => /pt[-_]BR/i.test(v.lang));
-  // padrão: Antonio Natural (Edge); sem ela, outra voz masculina pt-BR, de preferência natural
-  const masc = /Antonio|Ant[oô]nio|Felipe|Daniel|Donato|Fabio|F[aá]bio|Julio|J[uú]lio|Nicolau|Valerio|Val[eé]rio|Humberto|male|masculin/i, nat = /natural|online|enhanced|premium/i;
-  return vs.find(v => v.name === vozNome) || br.find(v => /Ant[oô]nio/i.test(v.name) && nat.test(v.name)) || br.find(v => masc.test(v.name) && nat.test(v.name)) || br.find(v => masc.test(v.name)) || br[0] || vs.find(v => /^pt/i.test(v.lang)) || null;
+  const vs = fala.getVoices();
+  return vs.find(v => v.name === vozNome) || vs.find(v => /pt[-_]BR/i.test(v.lang)) || vs.find(v => /^pt/i.test(v.lang)) || null;
 }
-function limparFala(s){ return s.replace(/\b(?:(?:ha|he|hi|rs){2,}|k{3,}|risos)\b/gi, '').replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').replace(/\s*,(\s*,)+/g, ',').replace(/\s+([,.!?])/g, '$1').trim(); }
-function enfileirar(frase){
-  const t = limparFala(frase); if (!t || !fala) return;
+function limparFala(s){ return s.replace(/\[[^\]]{1,30}\]/g, ' ').replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
+function textoEL(s){ return s.replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
+let elKey = LS.get('mv-el-key', ''), elVoz = LS.get('mv-el-voz', ''), elModelo = LS.get('mv-el-modelo', 'eleven_v4_turbo');
+const usaEL = () => !!(elKey && elVoz);
+const player = new Audio(); player.preload = 'auto';
+let filaAudio = [], tocando = false, geracao = 0, avisouEL = false;
+function aoComecarFala(){
+  if (st === 'pensando') setSt('falando');
+  if (st === 'falando' && porCima && ativo && !rec) ligarMic();
+}
+function falaTerminou(){ falandoN = Math.max(0, falandoN - 1); depoisDeFalar(); }
+function falarNavegador(t, fim){
+  if (!fala || !t) { fim(); return; }
   const u = new SpeechSynthesisUtterance(t);
-  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel; u.pitch = tom;
-  falandoN++;
-  u.onstart = () => {
-    if (st === 'pensando') setSt('falando');
-    if (st === 'falando' && porCima && ativo && !rec) ligarMic();
-  };
-  u.onend = u.onerror = () => { falandoN = Math.max(0, falandoN - 1); depoisDeFalar(); };
+  u.lang = 'pt-BR'; const v = vozEscolhida(); if (v) u.voice = v; u.rate = vel;
+  u.onstart = aoComecarFala; u.onend = u.onerror = fim;
   fala.speak(u);
+}
+function pedirAudio(t){
+  return fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(elVoz) + '?output_format=mp3_44100_128', {
+    method:'POST', headers:{'xi-api-key': elKey, 'content-type':'application/json', 'accept':'audio/mpeg'},
+    body: JSON.stringify({text: t, model_id: elModelo})
+  }).then(async r => {
+    if (!r.ok) {
+      let m = ''; try { const j = await r.json(); m = (j.detail && (j.detail.message || j.detail.status)) || ''; } catch (e) {}
+      throw new Error(r.status === 401 ? 'chave da ElevenLabs não aceita' : /quota|credit/i.test(m) ? 'créditos da ElevenLabs acabaram' : ('erro ' + r.status + (m ? ': ' + m : '')));
+    }
+    return r.blob();
+  });
+}
+function tocarProximo(){
+  const it = filaAudio.shift();
+  if (!it) { tocando = false; return; }
+  tocando = true;
+  const g = geracao;
+  it.p.then(res => {
+    if (g !== geracao) return;
+    const fim = () => { if (g !== geracao) return; falaTerminou(); tocarProximo(); };
+    if (!res || res.erro) {
+      if (!avisouEL) { avisouEL = true; aviso('A voz da ElevenLabs falhou (' + ((res && res.erro && res.erro.message) || 'sem resposta') + '). Usei a voz do navegador.'); }
+      falarNavegador(limparFala(it.t), fim); return;
+    }
+    const url = URL.createObjectURL(res);
+    player.src = url;
+    player.onended = () => { URL.revokeObjectURL(url); fim(); };
+    player.onerror = () => { URL.revokeObjectURL(url); fim(); };
+    player.play().then(aoComecarFala).catch(() => { URL.revokeObjectURL(url); falarNavegador(limparFala(it.t), fim); });
+  });
+}
+function enfileirar(frase){
+  if (usaEL()) {
+    const t = textoEL(frase); if (!limparFala(t)) return;
+    falandoN++;
+    filaAudio.push({t, p: pedirAudio(t).catch(e => ({erro: e}))});   // pede o áudio já, toca na ordem
+    if (!tocando) tocarProximo();
+    return;
+  }
+  const t = limparFala(frase); if (!t || !fala) return;
+  falandoN++;
+  falarNavegador(t, falaTerminou);
 }
 function depoisDeFalar(){
   if (falandoN > 0 || !streamFim) return;
   if (st === 'ouvindo') return;                       // ele já falou por cima e está sendo ouvido
   if (ativo) ouvir(); else if (st === 'falando' || st === 'pensando') setSt('parado');
 }
-function calar(){ if (fala) fala.cancel(); falandoN = 0; }
+function calar(){ geracao++; filaAudio = []; tocando = false; try { player.pause(); } catch (e) {} if (fala) fala.cancel(); falandoN = 0; }
 
 /* ---------- conversar com o Claude ---------- */
-function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
+function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + VOZ_EMOCAO : '') + '\n\nAgora: ' + new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) + '.'; }
 const ERROS = {
   401: 'A chave da API não foi aceita. Confira em Ajustes.',
   403: 'Esta chave não tem permissão para esse modelo.',
@@ -445,38 +490,23 @@ const ERROS = {
   529: 'O serviço está sobrecarregado agora. Tente daqui a pouco.'
 };
 async function chamar(mensagens, opts){
-  const m = opts.modelo || modelo;
   const corpo = {
-    model: m, max_tokens: opts.max || 500, stream: true,
-    system: [{type:'text', text: sistema() + [opts.web && FERRAMENTAS_REGRAS.web, opts.opus && FERRAMENTAS_REGRAS.opus, opts.extra].filter(Boolean).map(t => '\n\n' + t).join(''), cache_control: {type:'ephemeral'}}],
+    model: modelo, max_tokens: opts.max || 500, stream: true,
+    system: [{type:'text', text: sistema(), cache_control: {type:'ephemeral'}}],
     messages: mensagens
   };
-  const tools = [];
-  if (opts.web) tools.push({type: m === 'claude-haiku-5-5' ? 'web_search_20250305' : 'web_search_20260209', name: 'web_search', max_uses: 3,
-    user_location: {type:'approximate', city:'Rio de Janeiro', region:'Rio de Janeiro', country:'BR', timezone:'America/Sao_Paulo'}});
-  if (opts.opus) tools.push({name: 'pensar_com_opus', description: 'Passa a resposta deste pedido para um modelo mais forte, que pensa com mais cuidado. Use em pedidos complexos de verdade; no papo simples, responda você mesmo.',
-    input_schema: {type:'object', properties: {motivo: {type:'string', description:'Em poucas palavras, por que o pedido é complexo.'}}, required: ['motivo'], additionalProperties: false}});
-  if (tools.length) corpo.tools = tools;
-  if (m === OPUS) corpo.output_config = {effort: 'medium'};
-  const headers = {'content-type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'};
-  // se o filtro de segurança recusar, a própria API tenta de novo no modelo recomendado (não existe para o Haiku)
-  if (m !== 'claude-haiku-5-5') { corpo.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
-  let r = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal: opts.signal, headers, body: JSON.stringify(corpo)});
-  if (r.status === 400 && (corpo.tools || corpo.fallbacks)) {
-    // a API recusou busca, Opus ou fallback (ex.: busca desligada no Console): responde sem eles e avisa
-    let det = ''; try { const j = await r.json(); det = (j && j.error && j.error.message) || ''; } catch (e) {}
-    delete corpo.tools; delete corpo.fallbacks; delete headers['anthropic-beta'];
-    corpo.system[0].text = sistema() + (opts.extra ? '\n\n' + opts.extra : '');
-    aviso('Respondi sem internet e sem Opus, porque a API recusou esses recursos' + (det ? ': ' + det : '.'));
-    r = await fetch('https://api.anthropic.com/v1/messages', {method:'POST', signal: opts.signal, headers, body: JSON.stringify(corpo)});
-  }
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', signal: opts.signal,
+    headers: {'content-type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'},
+    body: JSON.stringify(corpo)
+  });
   if (!r.ok) {
     let msg = ERROS[r.status] || ('Erro ' + r.status + ' na API.');
     try { const j = await r.json(); const m = j && j.error && j.error.message || ''; if (/credit balance/i.test(m)) msg = 'Os créditos da API acabaram ou estão baixos. Confira em console.anthropic.com.'; } catch (e) {}
     throw new Error(msg);
   }
   const leitor = r.body.getReader(), dec = new TextDecoder();
-  let buf = '', texto = '', uso = {}, pedeOpus = false, fim = '';
+  let buf = '', texto = '', uso = {};
   for (;;) {
     const {value, done} = await leitor.read();
     if (done) break;
@@ -488,20 +518,13 @@ async function chamar(mensagens, opts){
       if (!dl) continue;
       let ev; try { ev = JSON.parse(dl.slice(5)); } catch (e) { continue; }
       if (ev.type === 'message_start' && ev.message && ev.message.usage) Object.assign(uso, ev.message.usage);
-      else if (ev.type === 'content_block_start' && ev.content_block) {
-        const b = ev.content_block;
-        if (b.type === 'text' && texto && !/\s$/.test(texto)) texto += ' ';                     // texto antes e depois de uma busca
-        else if (b.type === 'server_tool_use' && b.name === 'web_search' && opts.onBusca) opts.onBusca();
-        else if (b.type === 'tool_use' && b.name === 'pensar_com_opus') pedeOpus = true;
-      }
       else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') { texto += ev.delta.text; if (opts.onText) opts.onText(texto, ev.delta.text); }
-      else if (ev.type === 'message_delta') { if (ev.usage) Object.assign(uso, ev.usage); if (ev.delta && ev.delta.stop_reason) fim = ev.delta.stop_reason; }
+      else if (ev.type === 'message_delta' && ev.usage) Object.assign(uso, ev.usage);
       else if (ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Erro durante a resposta.');
     }
   }
-  somarCusto(uso, m);
-  if (fim === 'refusal' && !texto.trim()) texto = 'Esse assunto eu não consigo responder por aqui. Bora por outro caminho?';
-  return {texto, pedeOpus};
+  somarCusto(uso);
+  return texto;
 }
 
 async function enviar(texto){
@@ -513,32 +536,18 @@ async function enviar(texto){
   ctl = new AbortController(); streamFim = false;
   let falado = 0, resp = ''; falaAtual = '';
   const enviarFrases = (tudo, final) => {
-    // fala enquanto a resposta chega: a primeira frase sai logo, as seguintes em blocos maiores para não picotar a fala
+    // fala frase a frase enquanto a resposta chega
     falaAtual = tudo;
     let resto = tudo.slice(falado);
-    const re = /[.!?:;](\s|$)/g;
-    for (;;) {
-      const min = falado === 0 ? 12 : 90;
-      let fim = -1, m; re.lastIndex = 0;
-      while ((m = re.exec(resto))) { fim = m.index + m[0].length; if (resto.slice(0, fim).trim().length >= min) break; }
-      if (fim < 0 || resto.slice(0, fim).trim().length < min) break;
-      enfileirar(resto.slice(0, fim)); falado += fim; resto = tudo.slice(falado);
-    }
+    const re = /^[\s\S]*?[.!?:;](\s|$)/;
+    let m;
+    while ((m = resto.match(re)) && m[0].trim().length >= (usaEL() ? 40 : 12)) { enfileirar(m[0]); falado += m[0].length; resto = tudo.slice(falado); }
     if (final && resto.trim()) { enfileirar(resto); falado = tudo.length; }
   };
   try {
     const hist = msgs.slice(-24).map(m => ({role:m.role, content:m.content}));
     while (hist.length && hist[0].role !== 'user') hist.shift();
-    const aoBuscar = () => { if (st === 'pensando') $('dica').textContent = 'Pesquisando na internet.'; };
-    const r1 = await chamar(hist, {signal: ctl.signal, max: 2000, web: usarWeb, opus: usarOpus && modelo !== OPUS, onBusca: aoBuscar, onText: t => { resp = t; enviarFrases(t, false); }});
-    resp = r1.texto;
-    if (r1.pedeOpus) {
-      // pedido complexo: a frase de transição já está sendo falada, e o Opus responde em seguida
-      const antes = resp.trim(), sep = antes ? ' ' : '';
-      if (st === 'pensando') $('dica').textContent = 'Pensando com mais cuidado.';
-      const r2 = await chamar(hist, {signal: ctl.signal, modelo: OPUS, max: 8000, web: usarWeb, extra: OPUS_REGRA, onBusca: aoBuscar, onText: t => { resp = antes + sep + t; enviarFrases(resp, false); }});
-      resp = antes + sep + r2.texto;
-    }
+    resp = await chamar(hist, {signal: ctl.signal, max: 450, onText: t => { resp = t; enviarFrases(t, false); }});
     streamFim = true; enviarFrases(resp, true);
     msgs.push({role:'assistant', content: resp.trim() || '(sem resposta)'}); salvarMsgs(); renderMsgs();
     if (!fala || falandoN === 0) depoisDeFalar();
@@ -556,6 +565,8 @@ $('orb').addEventListener('click', () => {
     aviso(''); ativo = true; manterTela(true);
     // destrava a voz no iPhone com uma fala vazia dentro do toque
     if (fala) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; fala.speak(u); } catch (e) {} }
+    try { player.src = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACAAAA/oAR0dHR0dHR0dHR0dHYmJiYmJiYmJiYmJifHx8fHx8fHx8fHx8fJaWlpaWlpaWlpaWlrGxsbGxsbGxsbGxsbHLy8vLy8vLy8vLy8vl5eXl5eXl5eXl5eXl////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQC1AAAAAAAAAP6yysejgAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NCxKMAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NAxKQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80LEowAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80DEpAAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsSjAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=='; player.play().catch(() => {}); } catch (e) {}
+    avisouEL = false;
     ouvir(); return;
   }
   if (st === 'ouvindo') { ativo = false; pararOuvir(); setSt('parado'); legenda(''); manterTela(false); return; }
@@ -578,7 +589,7 @@ $('bResumo').addEventListener('click', async () => {
     if (hist.length && hist[hist.length - 1].role === 'user') hist.push({role:'assistant', content:'Certo.'});
     hist.push({role:'user', content:pedido});
     ctl = new AbortController(); streamFim = true;
-    const txt = (await chamar(hist, {signal: ctl.signal, max: 1400, onText: t => { $('rTxt').value = t; }})).texto;
+    const txt = await chamar(hist, {signal: ctl.signal, max: 1400, onText: t => { $('rTxt').value = t; }});
     $('rTxt').value = txt.trim(); $('rOk').hidden = true; abrir('resumo');
   } catch (e) { aviso(e.name === 'AbortError' ? '' : (e.message || 'Não consegui escrever o resumo.')); }
   finally { ctl = null; setSt('parado'); manterTela(false); }
@@ -594,9 +605,10 @@ $('rNova').addEventListener('click', () => { msgs = []; salvarMsgs(); renderMsgs
 /* ---------- folhas ---------- */
 function abrir(qual){
   if (qual === 'ajustes') {
-    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aTom').value = tom; $('aTomTxt').textContent = tom.toFixed(2).replace('.', ','); $('aEsp').value = espera; $('aEspTxt').textContent = seg(); $('aPorCima').checked = porCima; $('aWeb').checked = usarWeb; $('aOpus').checked = usarOpus;
+    $('aKey').value = key; $('aModelo').value = modelo; $('aCtx').value = ctx; $('aVel').value = vel; $('aVelTxt').textContent = vel.toFixed(2).replace('.', ','); $('aEsp').value = espera; $('aEspTxt').textContent = seg(); $('aPorCima').checked = porCima;
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes();
+    $('aElKey').value = elKey; $('aElModelo').value = elModelo; marcarVozEL(); if (elKey) creditosEL();
     $('fAjustes').hidden = false;
   } else $('fResumo').hidden = false;
 }
@@ -607,30 +619,71 @@ document.addEventListener('click', e => {
 });
 $('bAjustes').addEventListener('click', () => abrir('ajustes'));
 $('aVel').addEventListener('input', e => { $('aVelTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
-$('aTom').addEventListener('input', e => { $('aTomTxt').textContent = Number(e.target.value).toFixed(2).replace('.', ','); });
 $('aEsp').addEventListener('input', e => { $('aEspTxt').textContent = String(Number(e.target.value)).replace('.', ','); });
 $('aColar').addEventListener('click', async () => {
   try { const t = await navigator.clipboard.readText(); if (t) $('aCtx').value = t; }
   catch (e) { $('aCtxInfo').textContent = 'O navegador não deixou colar por aqui. Toque e segure dentro da caixa e escolha Colar.'; }
 });
 $('aSalvar').addEventListener('click', () => {
-  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; vozNome = $('aVoz').value;
+  key = $('aKey').value.trim(); modelo = $('aModelo').value; vel = Number($('aVel').value) || 1.05; vozNome = $('aVoz').value;
   espera = Number($('aEsp').value) || 2.5; porCima = $('aPorCima').checked; LS.set('mv-espera', String(espera)); LS.set('mv-porcima', porCima ? '1' : '0');
-  usarWeb = $('aWeb').checked; usarOpus = $('aOpus').checked; LS.set('mv-web', usarWeb ? '1' : '0'); LS.set('mv-opus', usarOpus ? '1' : '0');
   const novo = $('aCtx').value.trim();
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
-  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-tom', String(tom)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
+  elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
+  LS.set('mv-el-key', elKey); LS.set('mv-el-voz', elVoz); LS.set('mv-el-modelo', elModelo);
+  LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
   $('aOk').hidden = false; renderCtx(); renderCusto();
   setTimeout(fechar, 500);
 });
 $('aTeste').addEventListener('click', () => {
-  if (!fala) { $('aCtxInfo').textContent = 'Este navegador não tem voz.'; return; }
-  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 0.95; tom = Number($('aTom').value) || 0.85; calar();
-  enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
+  vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05;
+  elKey = $('aElKey').value.trim(); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
+  calar(); avisouEL = false; aviso('');
+  if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); setTimeout(creditosEL, 4000); }
+  else if (fala) enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
+  else $('aElInfo').textContent = 'Este navegador não tem voz. Use a voz da ElevenLabs.';
 });
+let vozesEL = [];
+function marcarVozEL(){
+  const sel = $('aElVoz');
+  const ops = ['<option value="">Nenhuma: usar a voz do navegador</option>'].concat(vozesEL.map(() => '<option></option>'));
+  if (elVoz && !vozesEL.some(v => v.voice_id === elVoz)) ops.push('<option></option>');
+  sel.innerHTML = ops.join('');
+  vozesEL.forEach((v, i) => { const o = sel.options[i + 1]; o.value = v.voice_id; o.textContent = v.name + (v.category === 'cloned' ? ' · sua voz clonada' : v.category ? ' · ' + v.category : ''); });
+  if (elVoz && !vozesEL.some(v => v.voice_id === elVoz)) { const o = sel.options[sel.options.length - 1]; o.value = elVoz; o.textContent = 'Voz salva (' + elVoz.slice(0, 8) + ')'; }
+  sel.value = elVoz || '';
+}
+$('aElBuscar').addEventListener('click', async () => {
+  const k = $('aElKey').value.trim(); if (!k) { $('aElInfo').textContent = 'Cole a chave da ElevenLabs primeiro.'; return; }
+  $('aElInfo').textContent = 'Buscando suas vozes.';
+  try {
+    const r = await fetch('https://api.elevenlabs.io/v1/voices', {headers:{'xi-api-key': k}});
+    if (!r.ok) throw new Error(r.status === 401 ? 'A chave não foi aceita.' : 'Erro ' + r.status + '.');
+    const j = await r.json();
+    vozesEL = (j.voices || []).sort((a, b) => (a.category === 'cloned' ? -1 : 0) - (b.category === 'cloned' ? -1 : 0));
+    elKey = k; marcarVozEL();
+    const clon = vozesEL.find(v => v.category === 'cloned');
+    if (clon && !elVoz) { $('aElVoz').value = clon.voice_id; }
+    $('aElInfo').textContent = vozesEL.length + ' vozes encontradas.' + (clon ? ' A sua voz clonada está no topo.' : ' Nenhuma voz clonada ainda.');
+    creditosEL();
+  } catch (e) { $('aElInfo').textContent = 'Não consegui buscar: ' + (e.message || 'falha de conexão') + ' Se aparecer erro de conexão, a ElevenLabs pode estar bloqueando o navegador, me avise.'; }
+});
+async function creditosEL(){
+  if (!elKey && !$('aElKey').value.trim()) return;
+  try {
+    const r = await fetch('https://api.elevenlabs.io/v1/user/subscription', {headers:{'xi-api-key': elKey || $('aElKey').value.trim()}});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (typeof j.character_count === 'number' && typeof j.character_limit === 'number') {
+      const resta = Math.max(0, j.character_limit - j.character_count);
+      $('aElInfo').textContent = 'Créditos da ElevenLabs: ' + resta.toLocaleString('pt-BR') + ' de ' + j.character_limit.toLocaleString('pt-BR') + ' neste mês.';
+      LS.set('mv-el-resta', String(resta)); renderCusto();
+    }
+  } catch (e) {}
+}
 $('aApagar').addEventListener('click', () => {
-  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-tom', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-web', 'mv-opus'].forEach(LS.del);
-  key = ''; ctx = ''; ctxEm = ''; msgs = []; renderMsgs(); renderCtx();
+  ['mv-key', 'mv-ctx', 'mv-ctx-em', 'mv-msgs', 'mv-voz', 'mv-vel', 'mv-modelo', 'mv-espera', 'mv-porcima', 'mv-el-key', 'mv-el-voz', 'mv-el-modelo', 'mv-el-resta'].forEach(LS.del);
+  key = ''; ctx = ''; ctxEm = ''; msgs = []; elKey = ''; elVoz = ''; renderMsgs(); renderCtx();
   $('aKey').value = ''; $('aCtx').value = '';
   $('aApagarOk').textContent = 'Apagado deste aparelho.'; $('aApagarOk').hidden = false;
 });
