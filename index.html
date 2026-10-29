@@ -189,10 +189,19 @@ details.conv > :not(summary){padding:0 16px 14px}
     <div class="campo">
       <label for="aProv">Voz do Mentor</label>
       <select id="aProv">
+        <option value="local">Voz própria · grátis, roda nesta página, sem instalar nada</option>
         <option value="vs">VoiceStudio no meu computador · grátis, sua voz clonada</option>
         <option value="el">ElevenLabs · na nuvem, rápida, usa os créditos da sua conta</option>
         <option value="">Voz do navegador · simples</option>
       </select>
+    </div>
+    <div class="campo bloco" id="blocoLocal">
+      <span class="cap">Voz própria</span>
+      <small>A voz é gerada aqui mesmo, no computador ou no celular, sem VoiceStudio, sem conta e sem custo. Na primeira vez a página baixa cerca de 90 MB. Depois fica guardada neste aparelho e abre na hora.</small>
+      <label for="aLcVoz">Qual voz</label>
+      <select id="aLcVoz"></select>
+      <div class="linha"><button type="button" class="btn ghost" id="aLcBaixar">Baixar a voz agora</button></div>
+      <small id="aLcInfo" role="status"></small>
     </div>
     <div class="campo bloco" id="blocoVS">
       <span class="cap">VoiceStudio</span>
@@ -325,6 +334,7 @@ const VOZ_REGRAS = [
   'Não use travessão nem ponto de exclamação.'
 ].join('\n');
 const VOZ_NATURAL_SEM_TAG = 'Fale como gente numa conversa: de vez em quando cabe um "olha", "pô", "caramba" ou "então", sem repetir a mesma abertura, e varie o ritmo. Não use marcações entre colchetes, esta voz não entende. Respostas bem curtas, de uma a três frases, porque cada frase leva alguns segundos para virar voz.';
+const VOZ_LOCAL = 'Fale como gente numa conversa: de vez em quando cabe um "olha", "pô", "caramba" ou "então", sem repetir a mesma abertura, e varie o ritmo. Não use marcações entre colchetes, esta voz não entende. Vírgulas e reticências ajudam a entonação aqui, pode usar.';
 const VOZ_EMOCAO_VS = [
   'A sua voz agora é natural e entende só estas marcações entre colchetes: [laughter] para uma risada, [sigh] para um suspiro e [pause 500ms] para uma pausa curta. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nenhuma outra marcação, e nunca escreva risada como texto, como haha ou kkk.',
   'Fale como gente numa conversa: de vez em quando cabe um "olha", "pô", "caramba" ou "então", sem repetir a mesma abertura, e varie o ritmo com frases curtas e algumas mais longas. Reticências e vírgulas ajudam a entonação aqui, pode usar. Sem exagero e sem forçar sotaque.'
@@ -444,7 +454,7 @@ function renderSessao(){
 }
 function aviso(t){
   const a = $('aviso'); a.textContent = t || ''; a.hidden = !t;
-  if (t && !$('fAjustes').hidden) $(provedor === 'el' ? 'aElInfo' : provedor === 'vs' ? 'aVsInfo' : 'aCtxInfo').textContent = t;   // a folha cobre o palco
+  if (t && !$('fAjustes').hidden) $(provedor === 'el' ? 'aElInfo' : provedor === 'vs' ? 'aVsInfo' : provedor === 'local' ? 'aLcInfo' : 'aCtxInfo').textContent = t;   // a folha cobre o palco
 }
 function legenda(t){ $('legenda').textContent = t || ''; }
 function dataBR(iso){ try { return new Date(iso).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); } catch (e) { return ''; } }
@@ -473,7 +483,7 @@ function renderCusto(){
   const resta = LS.get('mv-el-resta', ''); 
   const natural = typeof usaEL === 'function' && usaEL();
   $('modeloTxt').textContent = 'Modelo ' + (modelo === 'claude-haiku-5-5' ? 'Haiku 5.5' : 'Sonnet 5.5') + (natural && provedor === 'el' && resta ? ' · ' + Number(resta).toLocaleString('pt-BR') + ' créditos de voz' : '');
-  $('vozTxt').textContent = 'Voz ' + (natural ? (provedor === 'vs' ? 'VoiceStudio' : 'ElevenLabs') : 'do navegador');
+  $('vozTxt').textContent = 'Voz ' + (natural ? nomeProv() : 'do navegador');
 }
 function somarCusto(u, versao){
   if (versao !== undefined && versao !== dadosVersao) return;
@@ -512,7 +522,7 @@ function fecharTurno(extra){
   turno.fechado = true;
   if (turno.versao !== undefined && turno.versao !== dadosVersao) return; Object.assign(turno, extra || {});
   const m = turno.m, d = (a, b) => (m[a] != null && m[b] != null) ? Math.round(m[b] - m[a]) : null;
-  const reg = {quando: new Date().toISOString(), prov: provedor && usaEL() ? provedor + (provedor === 'vs' ? ':' + vsMotor : '') : 'navegador', modelo,
+  const reg = {quando: new Date().toISOString(), prov: provedor && usaEL() ? provedor + (provedor === 'vs' ? ':' + vsMotor : provedor === 'local' ? ':' + lcVoz : '') : 'navegador', modelo,
     silencio: turno.silencio, fala: turno.fala, ate_pedido: d('speech_ended', 'request_started'), ate_texto: d('speech_ended', 'first_text_token'),
     ate_audio: d('speech_ended', 'first_audio_chunk'), ate_voz: d('speech_ended', 'playback_started'), total: d('speech_ended', 'response_completed'),
     interrompido: !!turno.interrompido, interrupcao_rapida: !!turno.interrupcao_rapida, continuou: !!turno.continuou, erro: turno.erro || null};
@@ -657,14 +667,127 @@ function limparFala(s){ return s.replace(/\[[^\]]{1,30}\]/g, ' ').replace(/[*_#`
 function textoEL(s){ return semTom(s).replace(/[*_#`>]/g, '').replace(/R\$\s?(\d)/g, '$1').replace(/\s+/g, ' ').trim(); }
 let elKey = LS.get('mv-el-key', ''), elVoz = LS.get('mv-el-voz', ''), elModelo = LS.get('mv-el-modelo', 'eleven_v4_turbo');
 let vsUrl = LS.get('mv-vs-url', 'http://127.0.0.1:3900'), vsVoz = LS.get('mv-vs-voz', ''), vsMotor = LS.get('mv-vs-motor', 'moss-tts-nano');
-let provedor = LS.get('mv-prov', (elKey && elVoz) ? 'el' : 'vs');
+let lcVoz = LS.get('mv-lc-voz', 'pt_BR-faber-medium');
+let provedor = LS.get('mv-prov', (elKey && elVoz) ? 'el' : 'local');
 let pularNatural = false;   // depois de uma falha na sessão, segue na voz do navegador sem tentar de novo a cada frase
-const usaEL = () => !pularNatural && ((provedor === 'el' && !!(elKey && elVoz)) || (provedor === 'vs' && !!(vsUrl && vsVoz)));
+const usaEL = () => !pularNatural && ((provedor === 'el' && !!(elKey && elVoz)) || (provedor === 'vs' && !!(vsUrl && vsVoz)) || (provedor === 'local' && !!lcVoz && vozLocal.pode));
+
+/* ---------- voz própria: o Piper roda dentro da página, num worker; sem servidor, sem conta e sem custo ---------- */
+// modelos abertos (licença MIT) do projeto Piper. O primeiro uso baixa uns 90 MB e o navegador guarda para as próximas vezes
+const VOZES_LOCAIS = [{id: 'pt_BR-faber-medium', nome: 'Faber'}, {id: 'pt_BR-jeff-medium', nome: 'Jeff'}, {id: 'pt_BR-cadu-medium', nome: 'Cadu'}];
+const PIPER_HF = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/', PIPER_CAIXA = 'mentor-voz-piper-v1';
+const urlModelo = id => PIPER_HF + id.split('-')[1] + '/' + id.split('-')[2] + '/' + id + '.onnx';
+function motorPiper(HF, CAIXA){
+  // roda dentro do worker: os fonemas saem do espeak-ng e a voz do ONNX Runtime, os dois em WebAssembly
+  const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
+  const FON = 'https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize';
+  importScripts(ORT + 'ort.wasm.min.js', FON + '.js');
+  let base = null, voz = '', sessao = null, conf = null, fila = Promise.resolve(), baixado = 0;
+  const urlModelo = id => HF + id.split('-')[1] + '/' + id.split('-')[2] + '/' + id + '.onnx';
+  async function baixar(url){
+    let c = null; try { c = await caches.open(CAIXA); } catch (e) {}
+    const salvo = c && await c.match(url);
+    if (salvo) return salvo.arrayBuffer();
+    let r; try { r = await fetch(url); } catch (e) { throw new Error('não consegui baixar a voz, confira a internet'); }
+    if (!r.ok) throw new Error('o download da voz falhou, erro ' + r.status);
+    const partes = [], leitor = r.body.getReader();
+    for (;;) { const {done, value} = await leitor.read(); if (done) break; partes.push(value); baixado += value.length; postMessage({baixado}); }
+    const blob = new Blob(partes);
+    if (c) try { await c.put(url, new Response(blob)); } catch (e) {}   // sem espaço para guardar: funciona igual, só baixa de novo na próxima vez
+    return blob.arrayBuffer();
+  }
+  async function preparar(id){
+    if (!base) {
+      const [ortWasm, fonWasm, fonDados] = await Promise.all([baixar(ORT + 'ort-wasm-simd.wasm'), baixar(FON + '.wasm'), baixar(FON + '.data')]);
+      ort.env.wasm.numThreads = 1;   // o GitHub Pages não libera várias threads; uma só já gera mais rápido do que a fala
+      ort.env.wasm.wasmPaths = {'ort-wasm-simd.wasm': URL.createObjectURL(new Blob([ortWasm], {type: 'application/wasm'}))};
+      base = {fonModulo: await WebAssembly.compile(fonWasm), fonDados};
+    }
+    if (voz === id && sessao) return;
+    const [modelo, json] = await Promise.all([baixar(urlModelo(id)), baixar(urlModelo(id) + '.json')]);
+    if (sessao) { try { sessao.release(); } catch (e) {} sessao = null; }
+    conf = JSON.parse(new TextDecoder().decode(json));
+    sessao = await ort.InferenceSession.create(modelo, {executionProviders: ['wasm']});
+    voz = id;
+  }
+  async function fonemas(texto){
+    // o espeak roda uma vez por frase: cada chamada abre uma instância nova, reaproveitando o wasm e os dados já carregados
+    let saida = '';
+    const m = await createPiperPhonemize({
+      print: l => { saida += l; }, printErr: () => {},
+      getPreloadedPackage: () => base.fonDados.slice(0),
+      instantiateWasm: (imp, ok) => { WebAssembly.instantiate(base.fonModulo, imp).then(i => ok(i)); return {}; },
+      locateFile: u => FON + u.slice(u.lastIndexOf('.'))
+    });
+    m.callMain(['-l', conf.espeak.voice, '--input', JSON.stringify([{text: texto}]), '--espeak_data', '/espeak-ng-data']);
+    return JSON.parse(saida).phoneme_ids || [];
+  }
+  function wav(pcm, taxa){
+    // 16 bits, volume no pico como o Piper faz, e um respiro curto no fim para a próxima frase não grudar
+    let pico = .01; for (let i = 0; i < pcm.length; i++) { const a = Math.abs(pcm[i]); if (a > pico) pico = a; }
+    const ganho = .95 / pico, n = pcm.length + Math.round(taxa * .08), v = new DataView(new ArrayBuffer(44 + n * 2));
+    const txt = (p, s) => { for (let i = 0; i < s.length; i++) v.setUint8(p + i, s.charCodeAt(i)); };
+    txt(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); txt(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, taxa, true); v.setUint32(28, taxa * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); txt(36, 'data'); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i] * ganho)) * 32767, true);
+    return v.buffer;
+  }
+  async function falar(id, texto, vel){
+    await preparar(id);
+    const ids = await fonemas(texto);
+    if (!ids.length) throw new Error('a frase veio sem nada para falar');
+    const inf = conf.inference || {};
+    const f = {
+      input: new ort.Tensor('int64', BigInt64Array.from(ids, x => BigInt(x)), [1, ids.length]),
+      input_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(ids.length)]), [1]),
+      scales: new ort.Tensor('float32', Float32Array.from([inf.noise_scale ?? .667, (inf.length_scale ?? 1) / vel, inf.noise_w ?? .8]), [3])
+    };
+    if (conf.num_speakers > 1) f.sid = new ort.Tensor('int64', BigInt64Array.from([0n]), [1]);
+    return wav((await sessao.run(f)).output.data, conf.audio.sample_rate);
+  }
+  onmessage = e => {
+    const {n, tipo, id, texto, vel} = e.data;
+    // um pedido por vez, na ordem em que chegaram
+    fila = fila.then(() => tipo === 'preparar' ? preparar(id) : falar(id, texto, vel))
+      .then(r => postMessage({n, wav: r}, r ? [r] : []), er => postMessage({n, erro: String((er && er.message) || er)}));
+  };
+}
+const vozLocal = (() => {
+  const pode = typeof Worker === 'function' && typeof WebAssembly === 'object' && !!window.isSecureContext && typeof BigInt64Array === 'function';
+  const pendentes = new Map();
+  let w = null, n = 0, aoBaixar = null;
+  function abrir(){
+    if (w) return w;
+    w = new Worker(URL.createObjectURL(new Blob(['(' + motorPiper + ')(' + JSON.stringify(PIPER_HF) + ',' + JSON.stringify(PIPER_CAIXA) + ')'], {type: 'text/javascript'})));
+    w.onmessage = e => {
+      const d = e.data;
+      if (d.baixado != null) { if (aoBaixar) aoBaixar(d.baixado); return; }
+      const p = pendentes.get(d.n); if (!p) return;
+      pendentes.delete(d.n); if (d.erro) p.falha(new Error(d.erro)); else p.ok(d.wav);
+    };
+    w.onerror = e => {
+      // não carregou o motor (CDN bloqueado, navegador antigo): tudo o que esperava falha e a conversa segue na voz do navegador
+      if (e.preventDefault) e.preventDefault();
+      const er = new Error('a voz própria não carregou neste navegador');
+      pendentes.forEach(p => p.falha(er)); pendentes.clear(); try { w.terminate(); } catch (x) {} w = null;
+    };
+    return w;
+  }
+  const pedir = msg => new Promise((ok, falha) => { const k = ++n; pendentes.set(k, {ok, falha}); abrir().postMessage(Object.assign({n: k}, msg)); });
+  return {
+    pode,
+    preparar: id => pedir({tipo: 'preparar', id}),
+    falar: (id, texto, vel) => pedir({tipo: 'falar', id, texto, vel}).then(b => new Blob([b], {type: 'audio/wav'})),
+    ouvirDownload(f){ aoBaixar = f; },
+    async guardada(id){ try { return !!(await (await caches.open(PIPER_CAIXA)).match(urlModelo(id))); } catch (e) { return false; } }
+  };
+})();
 const player = new Audio(); player.preload = 'auto';
 const SILENCIO = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACAAAA/oAR0dHR0dHR0dHR0dHYmJiYmJiYmJiYmJifHx8fHx8fHx8fHx8fJaWlpaWlpaWlpaWlrGxsbGxsbGxsbGxsbHLy8vLy8vLy8vLy8vl5eXl5eXl5eXl5eXl////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQC1AAAAAAAAAP6yysejgAAAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NCxKMAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//NAxKQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80LEowAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/80DEpAAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsSjAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==';
 let filaAudio = [], tocando = false, geracao = 0, avisouEL = false;
 let cadeiaVS = Promise.resolve(), aquecido = false;   // o VoiceStudio gera um áudio por vez: pede em sequência e pula o que ficou velho
-const nomeProv = () => provedor === 'vs' ? 'VoiceStudio' : 'ElevenLabs';
+const nomeProv = () => provedor === 'vs' ? 'VoiceStudio' : provedor === 'local' ? 'própria' : 'ElevenLabs';
+const emSequencia = () => provedor === 'vs' || provedor === 'local';   // geram um áudio por vez, na ordem
 function aoComecarFala(){
   marca('playback_started');
   if (st === 'pensando') setSt('falando');
@@ -714,6 +837,7 @@ async function erroEL(r){
   return 'erro ' + r.status + (m ? ': ' + m.slice(0, 120) : '');
 }
 function pedirAudio(t){
+  if (provedor === 'local') return vozLocal.falar(lcVoz, limparFala(t), Math.min(1.6, vel * tom().vel));
   if (provedor === 'vs') {
     return fetch(vsUrl.replace(/\/+$/, '') + '/v1/audio/speech', {
       method:'POST', headers:{'content-type':'application/json'},
@@ -742,14 +866,14 @@ function tocarProximo(){
   tocando = true;
   adiantarEL(it);
   const g = geracao;
-  const demora = setTimeout(() => { if (g === geracao && st !== 'ouvindo') $('dica').textContent = provedor === 'vs' ? 'Preparando a voz no seu computador. Pode levar alguns segundos.' : 'Preparando a voz. A ElevenLabs está demorando um pouco.'; }, 4000);
+  const demora = setTimeout(() => { if (g === geracao && st !== 'ouvindo') $('dica').textContent = provedor === 'vs' ? 'Preparando a voz no seu computador. Pode levar alguns segundos.' : provedor === 'local' ? 'Preparando a voz neste aparelho.' : 'Preparando a voz. A ElevenLabs está demorando um pouco.'; }, 4000);
   it.p.then(res => {
     clearTimeout(demora);
     if (g !== geracao) return;
     const fim = () => { if (g !== geracao) return; falaTerminou(); tocarProximo(); };
     if (!res || res.erro) {
       if (turno) turno.erro_voz = true;
-      if (!avisouEL) { avisouEL = true; aviso('A voz ' + (provedor === 'vs' ? 'do VoiceStudio' : 'da ElevenLabs') + ' falhou: ' + String((res && res.erro && res.erro.message) || 'sem resposta').replace(/\.+$/, '') + '. Segui na voz do navegador.'); }
+      if (!avisouEL) { avisouEL = true; aviso('A voz ' + (provedor === 'vs' ? 'do VoiceStudio' : provedor === 'local' ? 'própria' : 'da ElevenLabs') + ' falhou: ' + String((res && res.erro && res.erro.message) || 'sem resposta').replace(/\.+$/, '') + '. Segui na voz do navegador.'); }
       if (!(res && res.erro && res.erro.temporario)) pularNatural = true;   // ocupado agora não desliga a voz da sessão
       falarNavegador(limparFala(it.t), fim, () => ouviu(it.t)); return;
     }
@@ -768,7 +892,7 @@ function enfileirar(frase){
     if (provedor === 'el' && !turno?.tomEnviado && tom().el && !/^\s*\[/.test(t)) { t = tom().el + ' ' + t; if (turno) turno.tomEnviado = true; }
     falandoN++;
     const g = geracao;
-    if (provedor === 'vs') filaAudio.push({t, p: cadeiaVS = cadeiaVS.then(() => g === geracao ? pedirAudio(t).catch(e => ({erro: e})) : {velho: true})});
+    if (emSequencia()) filaAudio.push({t, p: cadeiaVS = cadeiaVS.then(() => g === geracao ? pedirAudio(t).catch(e => ({erro: e})) : {velho: true})});
     else { filaAudio.push({t, p: null}); adiantarEL(); }              // na nuvem, pede só algumas frases à frente e toca na ordem
     if (!tocando) tocarProximo();
     return;
@@ -822,15 +946,15 @@ function continuarFala(idx){
 }
 function aquecerVoz(){
   // uma vez por sessão: pede um áudio curtinho enquanto ele fala, para o modelo já estar carregado na primeira resposta
-  if (aquecido || provedor !== 'vs' || !usaEL()) return;
+  if (aquecido || !emSequencia() || !usaEL()) return;
   aquecido = true;
-  cadeiaVS = cadeiaVS.then(() => pedirAudio('Oi.').catch(() => null));
+  cadeiaVS = cadeiaVS.then(() => (provedor === 'local' ? vozLocal.preparar(lcVoz) : pedirAudio('Oi.')).catch(() => null));
 }
 function calar(){ geracao++; filaAudio = []; tocando = false; try { player.pause(); } catch (e) {} if (fala) fala.cancel(); falandoN = 0; }
 
 /* ---------- conversar com o Claude ---------- */
 // o texto do system fica igual de um turno para o outro, para o cache da Anthropic funcionar; a hora vai na mensagem do turno
-function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + (provedor === 'vs' ? (vsMotor === 'omnivoice' ? VOZ_EMOCAO_VS : VOZ_NATURAL_SEM_TAG) : VOZ_EMOCAO) : ''); }
+function sistema(){ return (ctx ? ctx : SEM_CONTEXTO) + '\n\n' + VOZ_REGRAS + (usaEL() ? '\n' + (provedor === 'vs' ? (vsMotor === 'omnivoice' ? VOZ_EMOCAO_VS : VOZ_NATURAL_SEM_TAG) : provedor === 'local' ? VOZ_LOCAL : VOZ_EMOCAO) : ''); }
 function agoraTxt(){ return new Date().toLocaleString('pt-BR', {weekday:'long', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); }
 const ERROS = {
   401: 'A chave da API não foi aceita. Confira em Ajustes.',
@@ -1026,7 +1150,7 @@ function abrir(qual){
     $('aCtxInfo').textContent = ctx ? 'Contexto de ' + (ctxEm ? dataBR(ctxEm) : 'data desconhecida') + ', ' + Math.round(ctx.length / 1000) + ' mil caracteres.' : 'Sem contexto ainda.';
     $('aOk').hidden = true; $('aApagarOk').hidden = true; preencherVozes(); renderDesempenho();
     $('aElKey').value = elKey; $('aElModelo').value = elModelo; marcarVozEL(); if (elKey) creditosEL();
-    $('aProv').value = provedor; $('aVsUrl').value = vsUrl; $('aVsMotor').value = vsMotor; marcarVozVS(); mostrarBlocos();
+    $('aProv').value = provedor; $('aVsUrl').value = vsUrl; $('aVsMotor').value = vsMotor; marcarVozVS(); $('aLcVoz').value = lcVoz; infoLocal(); mostrarBlocos();
     $('fAjustes').hidden = false;
   } else $('fResumo').hidden = false;
   // folha aberta: o foco vai para ela e o fundo sai do alcance do teclado e do leitor de tela
@@ -1046,7 +1170,7 @@ function renderDesempenho(){
   // compara só turnos com a mesma voz da última conversa: navegador e VoiceStudio têm tempos muito diferentes
   const provAtual = l.length ? l[l.length - 1].prov : '', outros = l.filter(x => x.prov !== provAtual).length;
   l = l.filter(x => x.prov === provAtual);
-  const nomeVoz = p => p === 'navegador' ? 'voz do navegador' : p === 'el' ? 'ElevenLabs' : /^vs:/.test(p) ? 'VoiceStudio, ' + (p === 'vs:omnivoice' ? 'OmniVoice' : 'MOSS Nano') : p;
+  const nomeVoz = p => p === 'navegador' ? 'voz do navegador' : p === 'el' ? 'ElevenLabs' : /^vs:/.test(p) ? 'VoiceStudio, ' + (p === 'vs:omnivoice' ? 'OmniVoice' : 'MOSS Nano') : /^local:/.test(p) ? 'voz própria, ' + ((VOZES_LOCAIS.find(v => 'local:' + v.id === p) || {nome: p.slice(6)}).nome) : p;
   if (!l.length) { box.innerHTML = '<small>Ainda sem medições. Converse um pouco e volte aqui.</small>'; return; }
   const med = k => { const v = l.map(x => x[k]).filter(x => typeof x === 'number').sort((a, b) => a - b); if (!v.length) return null; const i = v.length >> 1; return v.length % 2 ? v[i] : Math.round((v[i - 1] + v[i]) / 2); };
   const s = ms => ms == null ? 'sem dado' : (ms / 1000).toFixed(1).replace('.', ',') + ' s';
@@ -1086,6 +1210,7 @@ $('aSalvar').addEventListener('click', () => {
   if (novo !== ctx) { ctx = novo; ctxEm = new Date().toISOString(); const m = novo.match(/CONTEXTO DA CABINE · (\S+)/); if (m && !isNaN(Date.parse(m[1]))) ctxEm = m[1]; }
   provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; vsMotor = $('aVsMotor').value; pularNatural = false; avisouEL = false;
   LS.set('mv-vs-motor', vsMotor); LS.set('mv-prov', provedor); LS.set('mv-vs-url', vsUrl); LS.set('mv-vs-voz', vsVoz);
+  lcVoz = $('aLcVoz').value || lcVoz; LS.set('mv-lc-voz', lcVoz);
   elKey = limparChave($('aElKey').value); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
   LS.set('mv-el-key', elKey); LS.set('mv-el-voz', elVoz); LS.set('mv-el-modelo', elModelo);
   LS.set('mv-key', key); LS.set('mv-modelo', modelo); LS.set('mv-vel', String(vel)); LS.set('mv-voz', vozNome); LS.set('mv-ctx', ctx); LS.set('mv-ctx-em', ctxEm);
@@ -1096,6 +1221,7 @@ $('aTeste').addEventListener('click', () => {
   vozNome = $('aVoz').value; vel = Number($('aVel').value) || 1.05;
   elKey = limparChave($('aElKey').value); elVoz = $('aElVoz').value; elModelo = $('aElModelo').value;
   provedor = $('aProv').value; vsUrl = $('aVsUrl').value.trim() || 'http://127.0.0.1:3900'; vsVoz = $('aVsVoz').value; vsMotor = $('aVsMotor').value;
+  lcVoz = $('aLcVoz').value || lcVoz;
   calar(); avisouEL = false; pularNatural = false; aviso('');
   try { player.src = SILENCIO; player.play().catch(() => {}); } catch (e) {}
   if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); if (provedor === 'el') setTimeout(() => { if (!avisouEL) creditosEL(); }, 4000); }   // com falha, deixa o motivo à vista
@@ -1103,8 +1229,31 @@ $('aTeste').addEventListener('click', () => {
   else $('aElInfo').textContent = 'Este navegador não tem voz. Use a voz da ElevenLabs.';
 });
 let vozesVS = [];
-function mostrarBlocos(){ const p = $('aProv').value; $('blocoVS').hidden = p !== 'vs'; $('blocoEL').hidden = p !== 'el'; }
+function mostrarBlocos(){ const p = $('aProv').value; $('blocoVS').hidden = p !== 'vs'; $('blocoEL').hidden = p !== 'el'; $('blocoLocal').hidden = p !== 'local'; }
 $('aProv').addEventListener('change', mostrarBlocos);
+$('aLcVoz').innerHTML = VOZES_LOCAIS.map(() => '<option></option>').join('');
+VOZES_LOCAIS.forEach((v, i) => { const o = $('aLcVoz').options[i]; o.value = v.id; o.textContent = v.nome; });
+let baixandoLocal = false;
+async function infoLocal(){
+  const id = $('aLcVoz').value, el = $('aLcInfo');
+  if (!vozLocal.pode) { el.textContent = 'Este navegador não roda a voz própria. Atualize o navegador ou escolha outra voz.'; return; }
+  if (baixandoLocal) return;
+  el.textContent = await vozLocal.guardada(id) ? 'Esta voz já está guardada neste aparelho.' : 'Esta voz ainda não foi baixada neste aparelho.';
+}
+$('aLcVoz').addEventListener('change', infoLocal);
+vozLocal.ouvirDownload(b => {
+  const t = 'Baixando a voz: ' + Math.round(b / 1e6) + ' MB. Na primeira vez são cerca de 90 MB.';
+  $('aLcInfo').textContent = t;
+  if (st === 'pensando' || st === 'falando') $('dica').textContent = t;
+});
+$('aLcBaixar').addEventListener('click', async () => {
+  if (!vozLocal.pode) { infoLocal(); return; }
+  const id = $('aLcVoz').value; baixandoLocal = true; $('aLcBaixar').disabled = true;
+  $('aLcInfo').textContent = 'Preparando a voz.';
+  try { await vozLocal.preparar(id); $('aLcInfo').textContent = 'Voz pronta neste aparelho. Toque em Testar a voz e depois em Salvar.'; }
+  catch (e) { $('aLcInfo').textContent = 'Não consegui preparar a voz: ' + String(e.message || e).replace(/\.+$/, '') + '.'; }
+  baixandoLocal = false; $('aLcBaixar').disabled = false;
+});
 function marcarVozVS(){
   const sel = $('aVsVoz');
   const lista = vozesVS.slice();
@@ -1173,7 +1322,7 @@ $('aApagar').addEventListener('click', () => {
   let chaves = []; try { chaves = Object.keys(localStorage).filter(k => k.startsWith('mv-')); } catch (e) {}
   chaves.forEach(LS.del);
   key = ''; ctx = ''; ctxEm = ''; msgs = []; elKey = ''; elVoz = ''; vsVoz = ''; vozesEL = []; vozesVS = [];
-  modelo = 'claude-sonnet-5-5'; vozNome = ''; vel = 1.05; espera = 2.5; porCima = true; provedor = 'vs';
+  modelo = 'claude-sonnet-5-5'; vozNome = ''; vel = 1.05; espera = 2.5; porCima = true; provedor = 'local'; lcVoz = 'pt_BR-faber-medium';
   vsUrl = 'http://127.0.0.1:3900'; vsMotor = 'moss-tts-nano'; elModelo = 'eleven_v4_turbo';
   renderMsgs(); renderCtx(); renderCusto();
   abrir('ajustes');   // reabre os campos já vazios, para "Salvar" não gravar nada de volta
