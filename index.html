@@ -8,7 +8,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="robots" content="noindex,nofollow">
-<title>Mentor Voz</title>
+<title>Icaro · Mentor Voz</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Icaro">
 <link rel="preconnect" href="https://api.anthropic.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -134,7 +138,7 @@ details.conv > :not(summary){padding:0 16px 14px}
 <body>
 <main class="app" id="app" data-st="parado">
   <header class="top">
-    <div><span class="cap">ICARUS</span><h1>Mentor Voz</h1></div>
+    <div><span class="cap">ICARUS · Mentor</span><h1>Icaro</h1></div>
     <div class="r">
       <button type="button" class="pill" id="bNova">Nova</button>
       <button type="button" class="pill" id="bAjustes">Ajustes</button>
@@ -187,7 +191,7 @@ details.conv > :not(summary){padding:0 16px 14px}
       <small id="aCtxInfo" role="status"></small>
     </div>
     <div class="campo">
-      <label for="aProv">Voz do Mentor</label>
+      <label for="aProv">Voz do Icaro</label>
       <select id="aProv">
         <option value="local">Voz própria · grátis, roda nesta página, sem instalar nada</option>
         <option value="vs">VoiceStudio no meu computador · grátis, sua voz clonada</option>
@@ -325,6 +329,8 @@ let dadosVersao = 0;   // muda em "Apagar tudo": o que estava em andamento não 
 
 const VOZ_REGRAS = [
   'CONVERSA POR VOZ. Isto vale acima de qualquer formato pedido antes: a sua resposta vai ser falada em voz alta, numa conversa ao vivo.',
+  'Seu nome é Icaro, o mentor pessoal dele. Vale mesmo que o contexto acima use outro nome para você. Diga o nome quando ele perguntar ou quando fizer sentido se apresentar, sem repetir a cada resposta.',
+  'Ele é Kleber Leonardo. Em conversa normal, chame de Leo ou Leonardo, variando entre os dois. Em momento sério, chame de Kleber: quando precisa chamar a atenção dele para um risco, uma dívida, um prazo estourando, uma decisão difícil ou algo que ele está evitando. Kleber é o sinal de que o assunto pesa, então não use à toa. Use o nome no máximo uma vez por resposta e nem sempre, como numa conversa de verdade.',
   'Comece SEMPRE com uma marcação de tom, que a voz usa e ele não ouve: [tom:animado], [tom:acolhedor], [tom:serio], [tom:curioso], [tom:reflexivo], [tom:leve] ou [tom:neutro]. Escolha pelo que ele acabou de dizer e pelo momento da conversa: conquista ou vitória, animado; dificuldade, cansaço, dívida pesando, acolhedor; dinheiro, prazo ou explicação técnica, serio; ideia sendo explorada, curioso; conversa profunda, reflexivo; brincadeira, leve. Mantenha o tom estável entre respostas e só troque quando o assunto mudar.',
   'Fale como numa ligação com alguém de confiança, em português do Brasil natural. Responda direto ao que ele disse: sem introdução como "claro" ou "ótima pergunta" e sem repetir a pergunta dele. Nada de listas, títulos, markdown, asteriscos, emojis ou símbolos. Escreva valores como se fala: "240 reais", "dia 8 de novembro".',
   'Tamanho conforme a conversa: uma frase quando uma frase basta, até 70 palavras quando precisa explicar. Se o assunto pedir mais, diga o principal e ofereça o resto. Pergunta no fim só quando ela fizer a conversa andar, não em toda resposta.',
@@ -343,7 +349,7 @@ const VOZ_EMOCAO = [
   'A sua voz agora é natural e entende marcações de emoção entre colchetes, em inglês: [laughs], [chuckles], [sighs], [excited], [warmly], [curious], [whispers]. Use como uma pessoa de verdade usaria, no máximo duas por resposta, só onde cabe: riso leve quando algo é engraçado ou quando comemora uma vitória dele, suspiro quando o assunto pesa. Nunca escreva risada como texto, como haha ou kkk.',
   'Fale como gente numa conversa: de vez em quando cabe um "olha", "pô", "caramba" ou "então", sem repetir a mesma abertura, e varie o ritmo com frases curtas e algumas mais longas. Sem exagero e sem forçar sotaque.'
 ].join('\n');
-const SEM_CONTEXTO = 'Você é o Mentor pessoal de quem usa esta página: estrategista calmo, direto e honesto. Você ainda não recebeu os dados da Cabine. Ajude com o que ele contar e lembre, uma vez só, que ele pode trazer o contexto da Cabine pelos Ajustes para você saber dos números dele.';
+const SEM_CONTEXTO = 'Você é o Icaro, mentor pessoal de quem usa esta página: estrategista calmo, direto e honesto. Você ainda não recebeu os dados da Cabine. Ajude com o que ele contar e lembre, uma vez só, que ele pode trazer o contexto da Cabine pelos Ajustes para você saber dos números dele.';
 
 let key = LS.get('mv-key', ''), modelo = LS.get('mv-modelo', 'claude-sonnet-5-5');
 let ctx = LS.get('mv-ctx', ''), ctxEm = LS.get('mv-ctx-em', '');
@@ -469,7 +475,7 @@ function renderMsgs(){
   const box = $('msgs');
   box.innerHTML = msgs.map(m => m.role === 'user'
     ? '<div class="msg"><span class="cap">Você</span><div class="q"></div></div>'
-    : '<div class="msg"><span class="cap">Mentor</span><div class="a"></div></div>').join('');
+    : '<div class="msg"><span class="cap">Icaro</span><div class="a"></div></div>').join('');
   [...box.children].forEach((el, i) => { el.lastElementChild.textContent = msgs[i].role === 'assistant' ? limparFala(msgs[i].content) : msgs[i].content; });
   $('convSum').textContent = msgs.length ? msgs.length + (msgs.length === 1 ? ' fala' : ' falas') : 'vazio';
   box.scrollTop = box.scrollHeight;
@@ -677,6 +683,9 @@ const usaEL = () => !pularNatural && ((provedor === 'el' && !!(elKey && elVoz)) 
 const VOZES_LOCAIS = [{id: 'pt_BR-faber-medium', nome: 'Faber'}, {id: 'pt_BR-jeff-medium', nome: 'Jeff'}, {id: 'pt_BR-cadu-medium', nome: 'Cadu'}];
 const PIPER_HF = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/', PIPER_CAIXA = 'mentor-voz-piper-v1';
 const urlModelo = id => PIPER_HF + id.split('-')[1] + '/' + id.split('-')[2] + '/' + id + '.onnx';
+// o Piper lê "Kleber" com a força no fim; o acento só no áudio leva para "KLÉ-ber". A tela continua mostrando como foi escrito
+const PRONUNCIA = [[/\bKleber\b/g, 'Kléber']];
+const comPronuncia = t => PRONUNCIA.reduce((s, [de, para]) => s.replace(de, para), t);
 function motorPiper(HF, CAIXA){
   // roda dentro do worker: os fonemas saem do espeak-ng e a voz do ONNX Runtime, os dois em WebAssembly
   const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
@@ -837,7 +846,7 @@ async function erroEL(r){
   return 'erro ' + r.status + (m ? ': ' + m.slice(0, 120) : '');
 }
 function pedirAudio(t){
-  if (provedor === 'local') return vozLocal.falar(lcVoz, limparFala(t), Math.min(1.6, vel * tom().vel));
+  if (provedor === 'local') return vozLocal.falar(lcVoz, comPronuncia(limparFala(t)), Math.min(1.6, vel * tom().vel));
   if (provedor === 'vs') {
     return fetch(vsUrl.replace(/\/+$/, '') + '/v1/audio/speech', {
       method:'POST', headers:{'content-type':'application/json'},
@@ -1017,7 +1026,7 @@ async function chamar(mensagens, opts){
   finally { somarCusto(uso, versao); }   // pedido cancelado também é cobrado: entra na estimativa
   if (!texto.trim()) {
     // nada de texto: não finge que respondeu
-    const er = new Error(parada === 'refusal' ? 'O Mentor não pode responder a esse pedido. Tente dizer de outro jeito.' : 'O Mentor não conseguiu montar a resposta desta vez. Pode repetir?');
+    const er = new Error(parada === 'refusal' ? 'O Icaro não pode responder a esse pedido. Tente dizer de outro jeito.' : 'O Icaro não conseguiu montar a resposta desta vez. Pode repetir?');
     er.semTexto = true; er.parada = parada || 'vazio'; throw er;
   }
   return texto;
@@ -1224,8 +1233,8 @@ $('aTeste').addEventListener('click', () => {
   lcVoz = $('aLcVoz').value || lcVoz;
   calar(); avisouEL = false; pularNatural = false; aviso('');
   try { player.src = SILENCIO; player.play().catch(() => {}); } catch (e) {}
-  if (usaEL()) { enfileirar('Oi, Kleber. [laughs] Aqui é o seu Mentor, com voz de gente. Bora conversar?'); if (provedor === 'el') setTimeout(() => { if (!avisouEL) creditosEL(); }, 4000); }   // com falha, deixa o motivo à vista
-  else if (fala) enfileirar('Oi, aqui é o seu Mentor. É assim que eu vou falar com você.');
+  if (usaEL()) { enfileirar('Oi, Leo. [laughs] Aqui é o Icaro, com voz de gente. Bora conversar?'); if (provedor === 'el') setTimeout(() => { if (!avisouEL) creditosEL(); }, 4000); }   // com falha, deixa o motivo à vista
+  else if (fala) enfileirar('Oi, Leo, aqui é o Icaro. É assim que eu vou falar com você.');
   else $('aElInfo').textContent = 'Este navegador não tem voz. Use a voz da ElevenLabs.';
 });
 let vozesVS = [];
@@ -1341,6 +1350,9 @@ if (fala && 'onvoiceschanged' in fala) fala.onvoiceschanged = () => { if (!$('fA
 
 /* ---------- início ---------- */
 renderCtx(); renderMsgs(); renderCusto(); setSt('parado');
+// voz própria já guardada neste aparelho: carrega o modelo enquanto a página abre, para a primeira resposta não esperar uns 5 s.
+// Só com a voz guardada: nunca começa um download de 90 MB sem ele pedir
+if (provedor === 'local' && vozLocal.pode) vozLocal.guardada(lcVoz).then(ok => { if (ok) vozLocal.preparar(lcVoz).catch(() => {}); });
 if (!key) $('dica').textContent = 'Primeiro, abra Ajustes e cole a chave da API e o contexto da Cabine.';
 if (!window.isSecureContext) aviso('Abra esta página por um endereço https, como o GitHub Pages. Fora disso o microfone não funciona.');
 })();
